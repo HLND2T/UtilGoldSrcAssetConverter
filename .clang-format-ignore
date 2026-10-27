@@ -1,0 +1,8 @@
+# Vendored and submodule sources are never reformatted.
+thirdparty/
+
+# Build output trees.
+build/
+build*/
+out/
+install/

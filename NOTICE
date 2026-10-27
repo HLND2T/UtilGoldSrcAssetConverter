@@ -1,0 +1,52 @@
+UtilGoldSrcAssetConverter
+Copyright (c) 2026 hzqst
+
+The code of this project is licensed under the MIT License (see LICENSE),
+except for the parts listed below, which keep their own terms.
+
+------------------------------------------------------------------------------
+Valve SDK files (thirdparty/ValveSDK)
+------------------------------------------------------------------------------
+
+interface.h, interface.cpp and FileSystem.h are Valve SDK code, copyright Valve
+Corporation, as modified by HLND2T-DiligentGraphics. They are NOT licensed under
+the MIT License: they keep their original copyright notices and are distributed
+under the Half-Life 1 SDK license in thirdparty/ValveSDK/LICENSE. The DLL, the
+command line tool and the DLL tests compile interface.cpp; the command line tool
+includes FileSystem.h.
+
+------------------------------------------------------------------------------
+Texture light table (src/HalfLifeTextureLights.h)
+------------------------------------------------------------------------------
+
+The colors and intensities of the Half-Life texture lights are the values of
+mapping/compilers/hl_lights.rad ("lights.rad for hl.wad", by Hezus) from the
+Sven Co-op SDK, compiled into the converter as data.
+
+------------------------------------------------------------------------------
+Submodules (thirdparty/)
+------------------------------------------------------------------------------
+
+GoldSrcRenderCore   https://github.com/HLND2T/GoldSrcRenderCore
+                    MIT License, Copyright (c) 2026 hzqst
+tinygltf            https://github.com/syoyo/tinygltf
+                    MIT License, Copyright (c) 2017 Syoyo Fujita, Aurélien
+                    Chatelain and many contributors
+stb                 https://github.com/DiligentGraphics/stb (fork of
+                    https://github.com/nothings/stb)
+                    MIT License, Copyright (c) 2017 Sean Barrett, or public
+                    domain (Unlicense), at your choice
+nlohmann/json       https://github.com/nlohmann/json
+                    MIT License, Copyright (c) 2013-2025 Niels Lohmann
+
+The license text of each submodule is in its directory. The DLL and the command
+line tool compile tinygltf, stb_image_write and nlohmann/json; distributions of
+them must keep these notices.
+
+The build fetches the formatting tooling MetaHookSv/FormatValidation (MIT) only
+when it is configured with FORMAT_VALIDATION_ONLY=ON.
+
+------------------------------------------------------------------------------
+
+Half-Life and GoldSrc are trademarks of Valve Corporation. This project is not
+affiliated with or endorsed by Valve Corporation.

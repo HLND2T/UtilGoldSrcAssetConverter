@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [Win32, x64]
+        config: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Configure
+        run: cmake -S . -B build -A ${{ matrix.arch }} -DUTILGOLDSRCASSETCONVERTER_VALIDATOR_TESTS=ON
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }} --parallel
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure
+      - name: Install
+        run: cmake --install build --config ${{ matrix.config }} --prefix install

@@ -1,0 +1,10 @@
+[submodule "thirdparty/tinygltf"]
+	path = thirdparty/tinygltf
+	url = https://github.com/syoyo/tinygltf.git
+[submodule "thirdparty/stb"]
+	path = thirdparty/stb
+	url = https://github.com/DiligentGraphics/stb.git
+[submodule "thirdparty/nlohmann_json"]
+	path = thirdparty/nlohmann_json
+	url = https://github.com/nlohmann/json.git
+	shallow = true
