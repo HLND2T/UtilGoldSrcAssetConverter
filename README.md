@@ -50,10 +50,11 @@ Each map goes into a directory named after it: the first command writes `out/c1a
 
 ## Building
 
-Requires CMake 3.20 and MSVC (Windows x86 or x64; continuous integration builds both). Clone with the submodules:
+Requires CMake 3.20, Git and MSVC (Windows x86 or x64; continuous integration builds both). The first configuration
+downloads the dependencies (see below) unless their source trees are given:
 
 ```bash
-git clone --recursive https://github.com/HLND2T/UtilGoldSrcAssetConverter.git
+git clone https://github.com/HLND2T/UtilGoldSrcAssetConverter.git
 cd UtilGoldSrcAssetConverter
 cmake -S . -B build -DUTILGOLDSRCASSETCONVERTER_VALIDATOR_TESTS=ON
 cmake --build build --config Debug
@@ -65,19 +66,17 @@ cmake --install build --config Debug --prefix install
 otherwise. The tests build their BSP files in code and need no game data. The DiligentTools loader test is built only
 when `DILIGENT_INCLUDE_DIRS`, `DILIGENT_LIBRARY_DIRS` and `DILIGENT_LIBRARIES` name a prebuilt DiligentEngine.
 
-| Dependency | Location | Cache variable |
+| Dependency | Source tree (cache or environment variable) | Fetched when the variable is empty |
 | --- | --- | --- |
-| [GoldSrcRenderCore](https://github.com/HLND2T/GoldSrcRenderCore) | fetched at `UTILGOLDSRCASSETCONVERTER_CORE_COMMIT` (CMake FetchContent) | `GSRENDERCORE_SOURCE_PATH` |
-| [tinygltf](https://github.com/syoyo/tinygltf) | `thirdparty/tinygltf` (submodule) | `UTILGOLDSRCASSETCONVERTER_TINYGLTF_DIR` |
-| [stb](https://github.com/DiligentGraphics/stb) | `thirdparty/stb` (submodule) | `UTILGOLDSRCASSETCONVERTER_STB_DIR` |
-| [nlohmann/json](https://github.com/nlohmann/json) | `thirdparty/nlohmann_json` (submodule) | `NLOHMANN_JSON_INCLUDE_DIRS` |
-| Valve SDK `interface.h`, `interface.cpp`, `FileSystem.h` | `thirdparty/ValveSDK` | `UTILGOLDSRCASSETCONVERTER_INTERFACE_DIR` |
+| [GoldSrcRenderCore](https://github.com/HLND2T/GoldSrcRenderCore) | `GSRENDERCORE_SOURCE_PATH` | `UTILGOLDSRCASSETCONVERTER_CORE_COMMIT` |
+| [tinygltf](https://github.com/syoyo/tinygltf) | `TINYGLTF_SOURCE_PATH` (directory of `tiny_gltf.h`) | `UTILGOLDSRCASSETCONVERTER_TINYGLTF_COMMIT` |
+| [stb](https://github.com/DiligentGraphics/stb) | `STB_SOURCE_PATH` | `UTILGOLDSRCASSETCONVERTER_STB_COMMIT` |
+| [nlohmann/json](https://github.com/nlohmann/json) | `NLOHMANN_JSON_SOURCE_PATH`, or the include directories in `NLOHMANN_JSON_INCLUDE_DIRS` | release v3.12.0 (`json.tar.xz`, SHA-256 checked) |
+| Valve SDK `interface.h`, `interface.cpp`, `FileSystem.h` | `UTILGOLDSRCASSETCONVERTER_INTERFACE_DIR` | not fetched: `thirdparty/ValveSDK` in this repository |
 
-tinygltf and stb are pinned to the versions DiligentTools ships, so the converter writes the same bytes in every build.
-A parent project may pass its own locations through the cache variables. GoldSrcRenderCore is not a submodule: a parent
-project's `GoldSrcRenderCore` target is used when it exists, then a source tree given in
-`GSRENDERCORE_SOURCE_PATH` (also read from the environment); only without either does the configuration fetch
-the pinned commit from GitHub.
+The pinned versions are set in `CMakeLists.txt`. tinygltf and stb are pinned to the versions DiligentTools ships, so
+the converter writes the same bytes in every build. A parent project that already defines the `GoldSrcRenderCore`
+target keeps it, and nothing is fetched when every source tree is given.
 
 ### `-basedir` and `filesystem_stdio.dll`
 
@@ -99,5 +98,5 @@ cmake --build build/format --target format-check   # or --target format to apply
 
 MIT for the code of this project, see [LICENSE](LICENSE). `thirdparty/ValveSDK` is Valve SDK code under its original
 terms, and the texture light table comes from the Sven Co-op SDK; [NOTICE](NOTICE) lists these and the licenses of the
-submodules. Half-Life and GoldSrc are trademarks of Valve Corporation; this project is not affiliated with or endorsed
+fetched dependencies. Half-Life and GoldSrc are trademarks of Valve Corporation; this project is not affiliated with or endorsed
 by Valve.

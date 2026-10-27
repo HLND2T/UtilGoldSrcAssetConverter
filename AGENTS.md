@@ -9,10 +9,13 @@ and `docs/GoldSrcBSPExtrasSchema.md` (`extras.goldsrc`) instead of reading the s
 - `include/Interface/IUtilGoldSrcAssetConverter.h`: the only public header. `src/`: the converter (the static
   `UtilGoldSrcAssetConverterCore`) and the DLL entry. `tools/`: `GoldSrcAssetConverterCLI`. `tests/`: BSP, DLL,
   glTF-Validator and DiligentTools loader tests.
-- `thirdparty/`: tinygltf, stb and nlohmann_json submodules, and the Valve SDK interface files. Do not modify them here.
-- GoldSrcRenderCore is not a submodule: the parent project's target, `GSRENDERCORE_SOURCE_PATH`, or else the
-  commit `UTILGOLDSRCASSETCONVERTER_CORE_COMMIT` fetched by CMake. Core changes are merged in its own repository first,
-  then `UTILGOLDSRCASSETCONVERTER_CORE_COMMIT` is updated here.
+- `thirdparty/ValveSDK`: the Valve SDK interface files, under their original terms. Keep them identical to the
+  HLND2T-DiligentGraphics copies.
+- No submodules. GoldSrcRenderCore, tinygltf, stb and nlohmann/json come from source trees given in
+  `GSRENDERCORE_SOURCE_PATH`, `TINYGLTF_SOURCE_PATH`, `STB_SOURCE_PATH` and `NLOHMANN_JSON_SOURCE_PATH` (or a parent
+  project's `GoldSrcRenderCore` target and `NLOHMANN_JSON_INCLUDE_DIRS`), else CMake fetches the versions pinned in
+  `CMakeLists.txt`. Core changes are merged in its own repository first, then `UTILGOLDSRCASSETCONVERTER_CORE_COMMIT`
+  is updated here.
 
 ## Compatibility
 

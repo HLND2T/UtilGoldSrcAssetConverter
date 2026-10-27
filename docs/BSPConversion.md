@@ -359,8 +359,8 @@ with `--external-textures`.
 
 ## Building and testing
 
-The project builds standalone from a recursive clone; `thirdparty/` holds tinygltf, stb and nlohmann_json as
-submodules and the Valve SDK interface files, and GoldSrcRenderCore is fetched at a pinned commit (see the README). A
+The project builds standalone: CMake fetches GoldSrcRenderCore, tinygltf, stb and nlohmann/json at pinned versions
+unless their source trees are given, and the Valve SDK interface files are in `thirdparty/ValveSDK` (see the README). A
 parent build may instead add it with `add_subdirectory` and pass its own dependency locations and GoldSrcRenderCore
 target; HLND2T-DiligentGraphics does so and installs the DLL and the tool next to the game executable. `UTILGOLDSRCASSETCONVERTER_BUILD_CLI=OFF` leaves the tool out. The converter itself is
 the static `UtilGoldSrcAssetConverterCore`, linked into the DLL and the BSP tests; `src/GoldSrcAssetConverterCore.h` is

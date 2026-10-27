@@ -24,7 +24,7 @@ mapping/compilers/hl_lights.rad ("lights.rad for hl.wad", by Hezus) from the
 Sven Co-op SDK, compiled into the converter as data.
 
 ------------------------------------------------------------------------------
-Submodules (thirdparty/)
+Dependencies fetched by the build (or given as source trees)
 ------------------------------------------------------------------------------
 
 GoldSrcRenderCore   https://github.com/HLND2T/GoldSrcRenderCore
@@ -39,7 +39,7 @@ stb                 https://github.com/DiligentGraphics/stb (fork of
 nlohmann/json       https://github.com/nlohmann/json
                     MIT License, Copyright (c) 2013-2025 Niels Lohmann
 
-The license text of each submodule is in its directory. The DLL and the command
+Each dependency carries its license text. The DLL and the command
 line tool compile tinygltf, stb_image_write and nlohmann/json; distributions of
 them must keep these notices.
 

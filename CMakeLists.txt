@@ -22,38 +22,64 @@ option(UTILGOLDSRCASSETCONVERTER_BUILD_CLI "Build the GoldSrcAssetConverterCLI c
 
 option(UTILGOLDSRCASSETCONVERTER_VALIDATOR_TESTS "Run the Khronos glTF-Validator (node + npm package gltf-validator) on the test outputs" OFF)
 
-# Dependencies: the submodules and files under thirdparty/, which a parent project may replace with its own locations.
-# GoldSrcRenderCore comes from the parent project's target when it has one, then from GSRENDERCORE_SOURCE_PATH,
-# and is otherwise fetched at UTILGOLDSRCASSETCONVERTER_CORE_COMMIT.
+# Dependencies. A parent project may pass its own source trees, also read from the environment; an empty one is fetched
+# at the version pinned here. tinygltf and stb are pinned to the versions DiligentTools ships, so that every build
+# writes the same bytes. GoldSrcRenderCore comes from the parent project's target first. The Valve SDK interface files
+# are part of this repository (thirdparty/ValveSDK).
 set(GSRENDERCORE_SOURCE_PATH "$ENV{GSRENDERCORE_SOURCE_PATH}" CACHE PATH
   "GoldSrcRenderCore source tree; empty fetches the pinned commit")
-set(UTILGOLDSRCASSETCONVERTER_CORE_REPOSITORY https://github.com/HLND2T/GoldSrcRenderCore.git)
-set(UTILGOLDSRCASSETCONVERTER_CORE_COMMIT 7f97da178df63daef4d931f0e05278b504b42322)
+set(TINYGLTF_SOURCE_PATH "$ENV{TINYGLTF_SOURCE_PATH}" CACHE PATH
+  "Directory of tiny_gltf.h; empty fetches the pinned commit")
+set(STB_SOURCE_PATH "$ENV{STB_SOURCE_PATH}" CACHE PATH
+  "Directory of stb_image.h and stb_image_write.h; empty fetches the pinned commit")
+set(NLOHMANN_JSON_SOURCE_PATH "$ENV{NLOHMANN_JSON_SOURCE_PATH}" CACHE PATH
+  "nlohmann/json source tree, unused when NLOHMANN_JSON_INCLUDE_DIRS is set; empty fetches the pinned release")
 set(UTILGOLDSRCASSETCONVERTER_INTERFACE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ValveSDK" CACHE PATH
   "Directory of interface.h and interface.cpp, and of FileSystem.h for the command line tool")
-set(UTILGOLDSRCASSETCONVERTER_TINYGLTF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/tinygltf" CACHE PATH
-  "Directory of tiny_gltf.h")
-set(UTILGOLDSRCASSETCONVERTER_STB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/stb" CACHE PATH
-  "Directory of stb_image.h and stb_image_write.h")
 
+set(UTILGOLDSRCASSETCONVERTER_CORE_REPOSITORY https://github.com/HLND2T/GoldSrcRenderCore.git)
+set(UTILGOLDSRCASSETCONVERTER_CORE_COMMIT 7f97da178df63daef4d931f0e05278b504b42322)
+set(UTILGOLDSRCASSETCONVERTER_TINYGLTF_REPOSITORY https://github.com/syoyo/tinygltf.git)
+set(UTILGOLDSRCASSETCONVERTER_TINYGLTF_COMMIT 73b2d0926fbc7538d5329e728e45d475e12ef86a)
+set(UTILGOLDSRCASSETCONVERTER_STB_REPOSITORY https://github.com/DiligentGraphics/stb.git)
+set(UTILGOLDSRCASSETCONVERTER_STB_COMMIT 46fcb30365c5f35425751d275eecd8e5f8efc786)
+set(UTILGOLDSRCASSETCONVERTER_JSON_URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz)
+set(UTILGOLDSRCASSETCONVERTER_JSON_SHA256 42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa)
+
+# Sets variable to the fetched source tree of name, unless the variable already names one. The sources are only
+# populated: their own CMake projects are not configured.
+function(utilgoldsrcassetconverter_fetch_source name variable)
+  if(NOT ${variable})
+    include(FetchContent)
+    FetchContent_Declare(${name} ${ARGN} SOURCE_SUBDIR _utilgoldsrcassetconverter_source_only)
+    FetchContent_MakeAvailable(${name})
+    set(${variable} "${${name}_SOURCE_DIR}" PARENT_SCOPE)
+  endif()
+endfunction()
+utilgoldsrcassetconverter_fetch_source(utilgoldsrcassetconverter_tinygltf TINYGLTF_SOURCE_PATH
+  GIT_REPOSITORY "${UTILGOLDSRCASSETCONVERTER_TINYGLTF_REPOSITORY}" GIT_TAG "${UTILGOLDSRCASSETCONVERTER_TINYGLTF_COMMIT}"
+  GIT_SUBMODULES "")
+utilgoldsrcassetconverter_fetch_source(utilgoldsrcassetconverter_stb STB_SOURCE_PATH
+  GIT_REPOSITORY "${UTILGOLDSRCASSETCONVERTER_STB_REPOSITORY}" GIT_TAG "${UTILGOLDSRCASSETCONVERTER_STB_COMMIT}"
+  GIT_SUBMODULES "")
 # tinygltf includes nlohmann's "json.hpp" by file name.
 if(NOT NLOHMANN_JSON_INCLUDE_DIRS)
-  set(NLOHMANN_JSON_INCLUDE_DIRS
-    "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/nlohmann_json/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/nlohmann_json/include/nlohmann")
+  utilgoldsrcassetconverter_fetch_source(utilgoldsrcassetconverter_json NLOHMANN_JSON_SOURCE_PATH
+    URL "${UTILGOLDSRCASSETCONVERTER_JSON_URL}" URL_HASH "SHA256=${UTILGOLDSRCASSETCONVERTER_JSON_SHA256}"
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  set(NLOHMANN_JSON_INCLUDE_DIRS "${NLOHMANN_JSON_SOURCE_PATH}/include" "${NLOHMANN_JSON_SOURCE_PATH}/include/nlohmann")
 endif()
 
-# A missing file usually means an uninitialized submodule: git submodule update --init
 function(utilgoldsrcassetconverter_require_files variable)
   foreach(required IN LISTS ARGN)
     if(NOT EXISTS "${${variable}}/${required}")
-      message(FATAL_ERROR "${variable} has no ${required}: '${${variable}}' (run git submodule update --init, or pass the directory)")
+      message(FATAL_ERROR "${variable} has no ${required}: '${${variable}}' (leave it empty to fetch the pinned version)")
     endif()
   endforeach()
 endfunction()
 utilgoldsrcassetconverter_require_files(UTILGOLDSRCASSETCONVERTER_INTERFACE_DIR interface.h interface.cpp FileSystem.h)
-utilgoldsrcassetconverter_require_files(UTILGOLDSRCASSETCONVERTER_TINYGLTF_DIR tiny_gltf.h)
-utilgoldsrcassetconverter_require_files(UTILGOLDSRCASSETCONVERTER_STB_DIR stb_image.h stb_image_write.h)
+utilgoldsrcassetconverter_require_files(TINYGLTF_SOURCE_PATH tiny_gltf.h)
+utilgoldsrcassetconverter_require_files(STB_SOURCE_PATH stb_image.h stb_image_write.h)
 set(json_found FALSE)
 foreach(json_dir IN LISTS NLOHMANN_JSON_INCLUDE_DIRS)
   if(EXISTS "${json_dir}/json.hpp")
@@ -61,7 +87,7 @@ foreach(json_dir IN LISTS NLOHMANN_JSON_INCLUDE_DIRS)
   endif()
 endforeach()
 if(NOT json_found)
-  message(FATAL_ERROR "NLOHMANN_JSON_INCLUDE_DIRS has no json.hpp: '${NLOHMANN_JSON_INCLUDE_DIRS}' (run git submodule update --init, or pass the directories)")
+  message(FATAL_ERROR "NLOHMANN_JSON_INCLUDE_DIRS has no json.hpp: '${NLOHMANN_JSON_INCLUDE_DIRS}'")
 endif()
 
 if(NOT TARGET GoldSrcRenderCore)
@@ -110,7 +136,7 @@ add_library(UtilGoldSrcAssetConverterCore STATIC
 target_compile_features(UtilGoldSrcAssetConverterCore PUBLIC cxx_std_17)
 target_include_directories(UtilGoldSrcAssetConverterCore
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
-  PRIVATE ${NLOHMANN_JSON_INCLUDE_DIRS} "${UTILGOLDSRCASSETCONVERTER_TINYGLTF_DIR}" "${UTILGOLDSRCASSETCONVERTER_STB_DIR}")
+  PRIVATE ${NLOHMANN_JSON_INCLUDE_DIRS} "${TINYGLTF_SOURCE_PATH}" "${STB_SOURCE_PATH}")
 target_link_libraries(UtilGoldSrcAssetConverterCore PUBLIC UtilGoldSrcAssetConverterInterface GoldSrcRenderCore)
 set_target_properties(UtilGoldSrcAssetConverterCore PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
@@ -155,7 +181,7 @@ if(UTILGOLDSRCASSETCONVERTER_BUILD_TESTS)
   add_executable(UtilGoldSrcAssetConverterTests tests/BSPConverterTests.cpp)
   target_link_libraries(UtilGoldSrcAssetConverterTests PRIVATE UtilGoldSrcAssetConverterCore GoldSrcRenderCoreTestFiles)
   target_include_directories(UtilGoldSrcAssetConverterTests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src" ${NLOHMANN_JSON_INCLUDE_DIRS} "${UTILGOLDSRCASSETCONVERTER_TINYGLTF_DIR}" "${UTILGOLDSRCASSETCONVERTER_STB_DIR}")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src" ${NLOHMANN_JSON_INCLUDE_DIRS} "${TINYGLTF_SOURCE_PATH}" "${STB_SOURCE_PATH}")
   if(MSVC)
     target_compile_options(UtilGoldSrcAssetConverterTests PRIVATE /bigobj /utf-8)
   endif()

@@ -1,4 +1,4 @@
-# Vendored and submodule sources are never reformatted.
+# Vendored sources are never reformatted.
 thirdparty/
 
 # Build output trees.
