@@ -24,7 +24,7 @@ CPU. It needs no render device and no running engine. The output loads in standa
    by class name, not by position; a missing or repeated worldspawn is a warning.
 4. **Geometry.** Every face of every model (see below), materials, lightmap atlases, meshes and the scene nodes.
 5. **Output.** tinygltf writes the document; the asset goes to the request's output sink, which is required, with the
-   external images after it.
+   external images, the area light descriptor and the render manifest after it (see "Output layout").
 
 The same input, texture images and options always give the same bytes: there are no timestamps, maps are written in
 key order, and `BSPConversionSummary::szCacheKey` names the input, images, converter version, schema version and
@@ -136,7 +136,7 @@ light. `bPreservePointEntities = false` omits both entities and their lights. `l
 lights already removed from the BSP are not converted. `KHR_lights_punctual` is listed in `extensionsUsed` only
 when lights exist, and is not required. This is a relighting starting point, not a physical equivalence to HLRAD.
 The parameter is included in the cache key. The current request layout requires `UtilGoldSrcAssetConverterAPI_004`;
-old interface versions are rejected. ConverterVersion is 7 and the extras schema remains 1.
+old interface versions are rejected. ConverterVersion is 8 and the extras schema remains 1.
 
 ## Faces
 
@@ -180,12 +180,12 @@ texture lights. This table needs no SDK installation and does not read external 
 intensity, or 0 to omit texture emission entirely while retaining the PBR material and alpha clipping. Negative,
 nonfinite and overflowing values fail with `InvalidRequest`; final emission strengths must fit in a float. The
 multiplier is included in the cache key and changes neither base colors nor baked lightmap data. ConverterVersion
-is 7. The public interface is `UtilGoldSrcAssetConverterAPI_004` because the options/request layout changed;
+is 8. The public interface is `UtilGoldSrcAssetConverterAPI_004` because the options/request layout changed;
 callers must rebuild against the new header. `extras.goldsrc` remains schema version 1.
 
 ### Adjacent LTC area light descriptors
 
-Every successful conversion writes `<resource>.sh9/area-lights.json` through the output sink, beside the model.
+Every successful conversion writes `<resource>/<resource>.sh9/area-lights.json` through the output sink, beside the model.
 No area light nodes or extensions are added to glTF. `bExportAreaLights` defaults to true; disabling it writes an
 empty descriptor, replacing stale data. `maxAreaLightsPerGroup` defaults to 16 and accepts 1–64; both options
 participate in the cache key. CLI equivalents are `--no-area-lights` and `--area-lights-per-group <count>`.
@@ -242,14 +242,64 @@ Textures are resolved per miptex slot, in this order:
 
 Miptexes are decoded as the engine does: the palette applies, and palette index 255 of `{` textures is transparent
 `(0, 0, 0, 0)`, giving `alphaMode: MASK` with cutoff 0.5. Images are PNG, embedded in the buffer by default or written as
-external files `textures/<index>_<name>.png` beside the asset without `bEmbedTextures`. The directory does not carry the
-resource name, so every asset needs a directory of its own: the image indices of two maps collide.
+external files `textures/<index>_<name>.png` beside the asset without `bEmbedTextures`. The image directory does not
+carry the resource name; the asset directory `<resource>/` keeps the images of two maps apart.
 
 Sky materials are a sky-blue placeholder (`isGoldSrcSky: true`); the sky box itself comes from the worldspawn
 `skyname`, recorded in the asset's extras, with the six face images when the resolver provides them. Water materials are
 double sided and name their liquid. Animated textures (`+0name`…), random tiling (`-0name`…), alternate sequences
 (`+aname`), scrolling textures and detail textures are described in the material's extras; the base color texture is
 the frame shown at time 0.
+
+## Output layout
+
+Every path the output sink receives is relative to its root, in this order:
+
+| File | Content |
+| --- | --- |
+| `<resource>/<resource>.glb` or `.gltf` | the asset |
+| `<resource>/textures/<index>_<name>.png` | the external images, without `bEmbedTextures`; the asset's URIs name them relative to it |
+| `<resource>/<resource>.sh9/area-lights.json` | the area light descriptor |
+| `<resource>.manifest.json` | the render manifest, written last |
+
+`<resource>` is `szResourceName`, or the identifier's file name without extension, with characters other than letters,
+digits, `-`, `_` and `.` replaced by `_`. A name of dots only would leave the root and is `InvalidRequest`. Assets
+written to one root need distinct resource names. With the root at a game's `maps/`, `maps/c1a0.bsp` gives
+`maps/c1a0/c1a0.glb` and `maps/c1a0.manifest.json` beside the map. The sink protocol has no rollback: the manifest comes
+last, so that it is only written once the files it names were accepted.
+
+### Render manifest
+
+The manifest (schema `RenderManifestSchemaVersion`, 1) tells a game which glTF models and files make up the map's
+rendering, and how the models are placed. Its paths are relative to the manifest's directory, use `/`, and stay inside
+it. The converter writes one model, the world:
+
+```json
+{
+  "schemaVersion": 1,
+  "converterVersion": 8,
+  "bspSha256": "<SHA-256 of the BSP bytes, lowercase hex>",
+  "models": [{ "path": "c1a0/c1a0.glb", "unitScale": 0.0254 }],
+  "files": ["c1a0/textures/*", "c1a0/c1a0.sh9/runtime.json", "c1a0/c1a0.sh9/atlas_rgba32f.bin"],
+  "graph": [{ "name": "World", "model": 0, "role": "world" }],
+  "lightProbes": { "type": "SH9", "header": "c1a0/c1a0.sh9/runtime.json", "atlas": "c1a0/c1a0.sh9/atlas_rgba32f.bin" }
+}
+```
+
+- `bspSha256` is `sourceHash`, the digest of the converted BSP bytes: a reader checks that the manifest belongs to the
+  map it loads, also after `asset.extras` was lost in an editor round trip.
+- `models[].path` names a glTF file; `unitScale` is the conversion's `scaleFactor`, glTF units per GoldSrc unit.
+- `files` lists the other files to load. `*` and `?` may appear in the last path segment only and match the files
+  directly in that directory. The converter lists `<resource>/textures/*` when the images are external, so that images
+  added to that directory later are found too, and declares the SH9 files of `gltf-bake-lighting`, which do not exist
+  until the map is baked; a reader treats a missing `files` entry as absent, not as an error.
+- `graph` places the models by index. TRS (`translation`, `rotation` as xyzw quaternion, `scaling`) are GoldSrc world
+  coordinates, units with Z up, omitted for the world. `role: "world"` marks the model that stands for the BSP world;
+  other nodes are static decorations a reader may add.
+- `lightProbes` names the SH9 header and atlas; both are listed in `files`.
+
+Readers ignore unknown keys. The manifest can be maintained by hand after conversion (for example to add decorations);
+a normal convert, edit and bake cycle needs no change to it.
 
 ## Lightmaps and lightstyles
 
@@ -309,7 +359,7 @@ class CFileOutputSink final : public IConversionOutputSink
 public:
     bool WriteFile(const char* szRelativePath, const std::uint8_t* pData, std::uint64_t bytes) noexcept override
     {
-        // The asset first, then its external images.
+        // The asset first, then its external images, the area light descriptor and the render manifest.
     }
 };
 
@@ -353,9 +403,9 @@ non-low-violence installation: `<game>_addon` (with `-addons`), `<game>_hd` (unl
 a path relative to them, or a name looked up as `maps/<name>.bsp`; the WAD files of the worldspawn's `wad` key are
 opened through them as `Mod_LoadEntities` and `TEX_InitFromWad` do (file name only, `.wad` extension, decal WADs
 skipped), and a missing one is reported and skipped. Textures are searched in the worldspawn's WAD files, then in the
-`--wad` files. Each map is written into a directory named after it in the output directory (`-o`, the current directory
-by default): `maps/c1a0.bsp` gives `c1a0/c1a0.glb` (`c1a0/c1a0.gltf` with `--gltf`), and the images in `c1a0/textures/`
-with `--external-textures`.
+`--wad` files. The output directory (`-o`, the current directory by default) is the sink's root (see "Output layout"):
+`maps/c1a0.bsp` gives `c1a0/c1a0.glb` (`c1a0/c1a0.gltf` with `--gltf`), the images in `c1a0/textures/` with
+`--external-textures`, and `c1a0.manifest.json`. Pass a game's `maps/` directory to install the result beside the map.
 
 ## Building and testing
 

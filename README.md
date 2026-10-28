@@ -45,8 +45,9 @@ GoldSrcAssetConverterCLI c1a0 -basedir "D:/Half-Life" -o out
 GoldSrcAssetConverterCLI de_dust2 -basedir "D:/Half-Life" -game cstrike -o out
 ```
 
-Each map goes into a directory named after it: the first command writes `out/c1a0/c1a0.glb`, and with `--gltf
---external-textures` `out/c1a0/c1a0.gltf` and the images in `out/c1a0/textures/`.
+Each map goes into a directory named after it, with its render manifest beside it: the first command writes
+`out/c1a0/c1a0.glb` and `out/c1a0.manifest.json`, and with `--gltf --external-textures` `out/c1a0/c1a0.gltf` and the
+images in `out/c1a0/textures/` (see "Output layout" in `docs/BSPConversion.md`).
 
 ## Building
 

@@ -14,10 +14,13 @@
 namespace GoldSrcAssetConverter
 {
 //Changes whenever the same input converts to different output; part of the cache key (see BSPConversionSummary).
-constexpr std::uint32_t ConverterVersion = 7;
+constexpr std::uint32_t ConverterVersion = 8;
 
 //Version of the extras.goldsrc schema (docs/GoldSrcBSPExtrasSchema.md).
 constexpr std::uint32_t ExtrasSchemaVersion = 1;
+
+//Version of the render manifest <resource>.manifest.json (docs/BSPConversion.md, "Render manifest").
+constexpr std::uint32_t RenderManifestSchemaVersion = 1;
 
 //See IUtilGoldSrcAssetConverter::ConvertBSP.
 BSPConversionSummary ConvertBSP(const BSPConversionRequestView& request) noexcept;

@@ -27,6 +27,9 @@ constexpr std::uint32_t s_GLBMagic = 0x46546C67;
 
 constexpr std::size_t s_SHA256HexLength = SHA256HexCapacity - 1;
 
+//Files of a conversion with embedded images: the asset, the area light descriptor and the render manifest.
+constexpr std::size_t s_ConvertedFileCount = 3;
+
 class CWADTextureResolver final : public ITextureResolver
 {
 public:
@@ -126,7 +129,9 @@ int main(int argc, char** argv)
 
     const auto summary = pConverter->ConvertBSP(request);
     Require(summary.error == ConversionError::None && !summary.szErrorMessage[0], "the test BSP converts through the interface");
-    Require(outputSink.m_Names.size() == 2 && outputSink.m_Names.front() == "converter_test.glb" && outputSink.m_Names.back() == "converter_test.sh9/area-lights.json", "the sink receives the asset and area light sidecar");
+    Require(outputSink.m_Names.size() == s_ConvertedFileCount && outputSink.m_Names.front() == "converter_test/converter_test.glb" && outputSink.m_Names[1] == "converter_test/converter_test.sh9/area-lights.json" &&
+                outputSink.m_Names.back() == "converter_test.manifest.json",
+            "the sink receives the asset, the area light descriptor and the render manifest");
 
     std::uint32_t magic{};
     Require(outputSink.m_Files.front().size() > sizeof(magic), "the asset has a header");
@@ -145,7 +150,7 @@ int main(int argc, char** argv)
     request.pOutputSink                      = &disabledLightSink;
     request.options.pointLightIntensityScale = 0;
     const auto disabledLights                = pConverter->ConvertBSP(request);
-    Require(disabledLights.error == ConversionError::None && disabledLightSink.m_Files.size() == 2, "the DLL accepts the new point light scale option");
+    Require(disabledLights.error == ConversionError::None && disabledLightSink.m_Files.size() == s_ConvertedFileCount, "the DLL accepts the new point light scale option");
     const std::string disabledAsset(disabledLightSink.m_Files.front().begin(), disabledLightSink.m_Files.front().end());
     Require(disabledAsset.find("KHR_lights_punctual") == std::string::npos && std::strcmp(summary.szCacheKey, disabledLights.szCacheKey) != 0, "the DLL option disables lights and changes the cache key");
     request.options.pointLightIntensityScale = 1;
