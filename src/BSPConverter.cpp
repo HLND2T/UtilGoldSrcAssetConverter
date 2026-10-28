@@ -53,7 +53,6 @@ constexpr char s_AreaLightFileName[]            = "area-lights.json";
 constexpr char s_LightProbeHeaderFileName[]     = "runtime.json";
 constexpr char s_LightProbeAtlasFileName[]      = "atlas_rgba32f.bin";
 constexpr char s_ManifestExtension[]            = ".manifest.json";
-constexpr char s_ManifestWildcard[]             = "*";
 constexpr char s_ManifestWorldRole[]            = "world";
 constexpr char s_ManifestWorldNodeName[]        = "World";
 constexpr char s_ManifestLightProbeType[]       = "SH9";
@@ -207,21 +206,14 @@ static bool IsValidResourceDirectory(const std::string& resourceName)
 }
 
 //The render manifest of an asset (docs/BSPConversion.md, "Render manifest"). Paths are relative to the manifest's
-//directory, which holds the asset directory. The engine reads the model and the files listed; the light probe files
-//are declared before a bake writes them, so that the manifest stays valid once they exist. The manifest is also a
-//Donut / RTXPT scene file: models are path strings and graph nodes index them, which is all a scene loader reads.
-static nlohmann::json MakeRenderManifest(const BSPConversionOptions& options, const std::string& assetDirectory, const std::string& assetPath, const std::string& lightProbeDirectory, const std::string& sourceDigest, bool bExternalImages)
+//directory, which holds the asset directory. A renderer reads the model and, through it, its buffers and images; the
+//light probe files are named before a bake writes them, so that the manifest stays valid once they exist. The manifest
+//is also a Donut / RTXPT scene file: models are path strings and graph nodes index them, which is all a scene loader
+//reads.
+static nlohmann::json MakeRenderManifest(const BSPConversionOptions& options, const std::string& assetPath, const std::string& lightProbeDirectory, const std::string& sourceDigest)
 {
     const auto lightProbeHeader = lightProbeDirectory + s_LightProbeHeaderFileName;
     const auto lightProbeAtlas  = lightProbeDirectory + s_LightProbeAtlasFileName;
-
-    nlohmann::json files = nlohmann::json::array();
-
-    if (bExternalImages)
-        files.push_back(assetDirectory + s_ExternalImageDirectory + s_ManifestWildcard);
-
-    files.push_back(lightProbeHeader);
-    files.push_back(lightProbeAtlas);
 
     nlohmann::json world;
     world["name"]  = s_ManifestWorldNodeName;
@@ -239,7 +231,6 @@ static nlohmann::json MakeRenderManifest(const BSPConversionOptions& options, co
     manifest["bspSha256"]        = sourceDigest;
     manifest["unitScale"]        = options.scaleFactor;
     manifest["models"]           = nlohmann::json::array({assetPath});
-    manifest["files"]            = std::move(files);
     manifest["graph"]            = nlohmann::json::array({std::move(world)});
     manifest["lightProbes"]      = std::move(lightProbes);
 
@@ -1299,7 +1290,7 @@ static void ConvertBSPInternal(const BSPConversionRequestView& request, CConvers
     const auto lightProbeDirectory = assetDirectory + resourceName + s_LightProbeDirectoryExtension;
     const auto areaPath            = lightProbeDirectory + s_AreaLightFileName;
     const auto manifestPath        = resourceName + s_ManifestExtension;
-    const auto manifestText        = MakeRenderManifest(request.options, assetDirectory, assetPath, lightProbeDirectory, sourceDigest, !document.GetExternalFiles().empty()).dump(2);
+    const auto manifestText        = MakeRenderManifest(request.options, assetPath, lightProbeDirectory, sourceDigest).dump(2);
 
     if (!request.pOutputSink->WriteFile(assetPath.c_str(), file.data(), file.size()))
         return Fail(result, ConversionError::OutputFailed, "the output sink rejected " + assetPath);

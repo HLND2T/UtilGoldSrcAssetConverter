@@ -136,7 +136,7 @@ light. `bPreservePointEntities = false` omits both entities and their lights. `l
 lights already removed from the BSP are not converted. `KHR_lights_punctual` is listed in `extensionsUsed` only
 when lights exist, and is not required. This is a relighting starting point, not a physical equivalence to HLRAD.
 The parameter is included in the cache key. The current request layout requires `UtilGoldSrcAssetConverterAPI_004`;
-old interface versions are rejected. ConverterVersion is 9 and the extras schema remains 1.
+old interface versions are rejected. ConverterVersion is 10 and the extras schema remains 1.
 
 ## Faces
 
@@ -180,7 +180,7 @@ texture lights. This table needs no SDK installation and does not read external 
 intensity, or 0 to omit texture emission entirely while retaining the PBR material and alpha clipping. Negative,
 nonfinite and overflowing values fail with `InvalidRequest`; final emission strengths must fit in a float. The
 multiplier is included in the cache key and changes neither base colors nor baked lightmap data. ConverterVersion
-is 9. The public interface is `UtilGoldSrcAssetConverterAPI_004` because the options/request layout changed;
+is 10. The public interface is `UtilGoldSrcAssetConverterAPI_004` because the options/request layout changed;
 callers must rebuild against the new header. `extras.goldsrc` remains schema version 1.
 
 ### Adjacent LTC area light descriptors
@@ -270,20 +270,22 @@ last, so that it is only written once the files it names were accepted.
 
 ### Render manifest
 
-The manifest (schema `RenderManifestSchemaVersion`, 2) tells a game which glTF models and files make up the map's
-rendering, and how the models are placed. Its paths are relative to the manifest's directory, use `/`, and stay inside
-it. It is also a scene file in the Donut format that the RTXPT path tracer reads: `models` and `graph` are what such a
-scene loader needs, and it ignores the other keys. Loaded as a scene, the manifest's directory is the assets root. The
-converter writes one model, the world:
+The manifest (schema `RenderManifestSchemaVersion`, 2) tells a game which glTF models make up the map's rendering, and
+how the models are placed. Its paths are relative to the manifest's directory, use `/`, and stay inside it. It is also
+a scene file in the Donut format that the RTXPT path tracer reads: `models` and `graph` are what such a scene loader
+needs, and it ignores the other keys. Loaded as a scene, the manifest's directory is the assets root. The manifest, its
+directory and everything under it form the map's world package: a renderer reads the files from there as it needs
+them, the models from the manifest, their buffers and images through the URIs of each glTF file (relative to that
+file), and the light probes from `lightProbes`; nothing outside the directory belongs to the package. The converter
+writes one model, the world:
 
 ```json
 {
   "schemaVersion": 2,
-  "converterVersion": 9,
+  "converterVersion": 10,
   "bspSha256": "<SHA-256 of the BSP bytes, lowercase hex>",
   "unitScale": 0.0254,
   "models": ["c1a0/c1a0.glb"],
-  "files": ["c1a0/textures/*", "c1a0/c1a0.sh9/runtime.json", "c1a0/c1a0.sh9/atlas_rgba32f.bin"],
   "graph": [{ "name": "World", "model": 0, "role": "world" }],
   "lightProbes": { "type": "SH9", "header": "c1a0/c1a0.sh9/runtime.json", "atlas": "c1a0/c1a0.sh9/atlas_rgba32f.bin" }
 }
@@ -295,15 +297,15 @@ converter writes one model, the world:
   `(x, y, z)` is `(x, z, -y) × unitScale`, the transform of `BSP_Root` (see "Coordinates"). A game uses it to place its
   camera and entities in the scene.
 - `models` names the glTF files.
-- `files` lists the other files to load. `*` and `?` may appear in the last path segment only and match the files
-  directly in that directory. The converter lists `<resource>/textures/*` when the images are external, so that images
-  added to that directory later are found too, and declares the SH9 files of `gltf-bake-lighting`, which do not exist
-  until the map is baked; a reader treats a missing `files` entry as absent, not as an error.
 - `graph` places the models by index (`model`, an unsigned integer). TRS (`translation`, `rotation` as xyzw
   quaternion, `scaling`) are in scene space, the space of the world model: Y up, in scene units. They are omitted for
   the world, and nodes may nest under `children`. `role: "world"` marks the model that stands for the BSP world; other
   nodes are static decorations a reader may add.
-- `lightProbes` names the SH9 header and atlas; both are listed in `files`.
+- `lightProbes` names the SH9 header and atlas of `gltf-bake-lighting`, which do not exist until the map is baked; a
+  reader treats them as not baked yet, not as an error, while they are missing.
+
+Converters before version 10 also wrote `files`, a list of the other files for a game to collect, with wildcards. It
+is no longer written, and readers ignore it: the files a model needs are the ones its glTF references.
 
 Readers ignore unknown keys. The manifest can be maintained by hand after conversion (for example to add decorations);
 a normal convert, edit and bake cycle needs no change to it.
