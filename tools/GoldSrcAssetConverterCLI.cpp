@@ -12,8 +12,8 @@
 //the worldspawn's "wad" key lists are found through them.
 //Textures come from the BSP's embedded miptexes, then from the worldspawn's WAD files, then from the WAD files given
 //(every *.wad of --wad-dir, in name order), searched in order. Outputs are written into a directory named after the map
-//in the output directory (the current one by default): maps/c1a0.bsp gives c1a0/c1a0.glb, and c1a0/textures/ with
-//--external-textures.
+//in the output directory (the current one by default), with the render manifest beside it: maps/c1a0.bsp gives
+//c1a0/c1a0.glb, c1a0/textures/ with --external-textures, and c1a0.manifest.json.
 #include "IUtilGoldSrcAssetConverter.h"
 #include "FileSystem.h"
 
@@ -426,7 +426,8 @@ private:
     const std::vector<std::vector<std::uint8_t>>& m_Wads;
 };
 
-//Writes every file under the output directory and remembers the asset's path, the first file written.
+//Writes every file under the output directory and remembers the asset's path, the first file written, and the
+//manifest's, the last.
 class CDirectoryOutputSink final : public IConversionOutputSink
 {
 public:
@@ -450,6 +451,8 @@ public:
             if (m_AssetPath.empty())
                 m_AssetPath = path;
 
+            m_LastPath = path;
+
             return true;
         }
         catch (const std::exception&)
@@ -463,9 +466,15 @@ public:
         return m_AssetPath;
     }
 
+    const std::filesystem::path& GetLastPath() const
+    {
+        return m_LastPath;
+    }
+
 private:
     std::filesystem::path m_Directory;
     std::filesystem::path m_AssetPath;
+    std::filesystem::path m_LastPath;
 };
 
 class CConsoleDiagnosticSink final : public IDiagnosticSink
@@ -630,9 +639,9 @@ int main(int argc, char** argv)
     const auto resourceName = std::filesystem::u8path(mapPath).stem().u8string();
     const auto sourcePath   = std::filesystem::u8path(mapPath).generic_u8string();
 
-    //The images go under textures/ beside the asset, so each map gets a directory of its own.
+    //The converter puts the asset into a directory named after the resource, and the manifest beside it.
     CWADTextureResolver    resolver(pConverter, wads);
-    CDirectoryOutputSink   outputSink(outputDirectory / std::filesystem::u8path(resourceName));
+    CDirectoryOutputSink   outputSink(outputDirectory);
     CConsoleDiagnosticSink diagnosticSink;
 
     request.asset.szIdentifier = identifier.c_str();
@@ -655,6 +664,7 @@ int main(int argc, char** argv)
     const auto& statistics = summary.statistics;
 
     std::cout << outputSink.GetAssetPath().string() << '\n'
+              << "  manifest " << outputSink.GetLastPath().string() << '\n'
               << "  models " << statistics.modelCount << ", world faces " << statistics.worldFaceCount << ", sky faces " << statistics.skyFaceCount << ", water faces " << statistics.waterFaceCount
               << ", degenerate faces " << statistics.degenerateFaceCount << '\n'
               << "  entities " << statistics.entityCount << ", brush entity nodes " << statistics.brushEntityNodeCount << ", point entity nodes " << statistics.pointEntityNodeCount

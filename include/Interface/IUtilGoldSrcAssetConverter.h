@@ -46,7 +46,8 @@ struct BSPConversionOptions
     bool bPreserveSurfaceMetadata{true};
     bool bPreserveEntityKeyValues{true};
 
-    //Images are stored in the binary buffer; otherwise they are written as external PNG files next to the asset.
+    //Images are stored in the binary buffer; otherwise they are written as external PNG files under textures/ beside
+    //the asset.
     bool bEmbedTextures{true};
 
     //Optional raw BSP spatial data, stored in the binary buffer and indexed by extras.goldsrc.spatialData.
@@ -67,7 +68,8 @@ struct BSPConversionOptions
     //scaleFactor squared to preserve illumination when scaling the map. Final intensities must fit in a float.
     float pointLightIntensityScale{1.0f};
 
-    //Write <resource>.sh9/area-lights.json, including an empty list when disabled to replace stale descriptors.
+    //Write <resource>/<resource>.sh9/area-lights.json, including an empty list when disabled to replace stale
+    //descriptors.
     bool          bExportAreaLights{true};
     std::uint32_t maxAreaLightsPerGroup{16}; //Valid range: 1-64.
 };
@@ -175,9 +177,11 @@ public:
     virtual bool ResolveTexture(const TextureRequest& request, ResolvedTexture* pTexture) noexcept = 0;
 };
 
-//Receives the converted files, on the converting thread: the asset itself first, then the external images.
-//szRelativePath and pData are borrowed for the call. The images are under textures/ beside the asset, whatever its name,
-//so every asset needs a directory of its own.
+//Receives the converted files, on the converting thread, with paths relative to the sink's root: the asset itself first,
+//<resource>/<resource>.glb or .gltf, then its external images under <resource>/textures/, the area light descriptor
+//<resource>/<resource>.sh9/area-lights.json, and last the render manifest <resource>.manifest.json, which names the
+//others relative to the root. szRelativePath and pData are borrowed for the call. Assets written to one root need
+//distinct resource names.
 class IConversionOutputSink : public IBaseInterface
 {
 public:
@@ -198,9 +202,10 @@ constexpr std::uint32_t MaxConversionStringLength = 4096;
 //Everything is borrowed for the call. asset's bindings name the textures the caller knows (each a slot the texture
 //lump holds, at most once), and the converter binds every other miptex slot itself, so that every face keeps its
 //texture name, size and texinfo flags, as the engine loads the map. pOutputSink is required; pTextureResolver and
-//pDiagnosticSink may be null. szResourceName names the output files; null or empty selects the asset's identifier file
-//name, or "map". szSourcePath is only recorded in the metadata and may be null. Both are null-terminated UTF-8 of at
-//most MaxConversionStringLength bytes.
+//pDiagnosticSink may be null. szResourceName names the asset directory and the output files (see IConversionOutputSink),
+//characters other than letters, digits, '-', '_' and '.' replaced by '_'; null or empty selects the asset's identifier
+//file name, or "map". A name of dots only is InvalidRequest. szSourcePath is only recorded in the metadata and may be
+//null. Both are null-terminated UTF-8 of at most MaxConversionStringLength bytes.
 struct BSPConversionRequestView
 {
     GoldSrcRender::BSPAssetView asset;

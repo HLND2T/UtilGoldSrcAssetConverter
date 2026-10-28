@@ -63,6 +63,17 @@ constexpr int s_ModeTriangles          = 4;
 //The directory of the external images, beside the asset.
 constexpr char s_ExternalImageDirectory[] = "textures/";
 
+//Output layout of the test map maps/converter_test.bsp: the asset directory named after the resource, holding the asset,
+//its images and its light probe directory, and the render manifest beside it.
+constexpr char s_TestAssetDirectory[]   = "converter_test/";
+constexpr char s_TestGLBPath[]          = "converter_test/converter_test.glb";
+constexpr char s_TestGLTFPath[]         = "converter_test/converter_test.gltf";
+constexpr char s_TestAreaLightPath[]    = "converter_test/converter_test.sh9/area-lights.json";
+constexpr char s_TestLightProbeHeader[] = "converter_test/converter_test.sh9/runtime.json";
+constexpr char s_TestLightProbeAtlas[]  = "converter_test/converter_test.sh9/atlas_rgba32f.bin";
+constexpr char s_TestManifestPath[]     = "converter_test.manifest.json";
+constexpr char s_TestImageWildcard[]    = "converter_test/textures/*";
+
 static void WriteOutput(const std::string& name, const std::vector<std::uint8_t>& bytes)
 {
     if (s_OutputDirectory.empty())
@@ -328,8 +339,8 @@ static int FindChildMesh(const Document& document, int node)
 }
 
 //A conversion as the tests write it: the request with standard library callbacks, and what the test sinks collected.
-//Without outputSink, the asset (the first file the converter writes) is kept in fileName and data, and the external
-//images in externalFiles.
+//Without outputSink, the asset (the first file the converter writes) is kept in fileName and data, and the other files
+//(images, area light descriptor, render manifest) in externalFiles.
 using TestTextureResolver = std::function<bool(const TextureRequest& request, ResolvedTexture& texture)>;
 using TestOutputSink      = std::function<bool(const char* szRelativePath, const std::uint8_t* pData, std::uint64_t bytes)>;
 
@@ -1931,6 +1942,86 @@ static void TestInvalidInput()
     Require(HasDiagnostic(run.result, DiagnosticCode::MissingWorldspawn) && ModelMesh(document, 0, "surface") >= 0, "a missing worldspawn is reported");
 }
 
+//The parsed file the converter wrote at relativePath, after the asset.
+static json OutputJSON(const ConversionResult& result, const std::string& relativePath)
+{
+    for (const auto& file : result.externalFiles)
+    {
+        if (file.relativePath == relativePath)
+            return json::parse(file.bytes);
+    }
+
+    Require(false, "the output file exists");
+    return {};
+}
+
+//The render manifest beside the asset directory: the model, its images, the light probe files of a later bake and the
+//world node, with paths relative to the manifest's directory.
+static void TestRenderManifest()
+{
+    const auto file = MakeConverterTestBSP();
+    const auto run  = Convert(file, {});
+    Require(run.result.bSuccess && run.result.externalFiles.back().relativePath == s_TestManifestPath, "the manifest is the last file written");
+
+    const auto manifest = OutputJSON(run.result, s_TestManifestPath);
+    Require(manifest["schemaVersion"] == RenderManifestSchemaVersion && manifest["converterVersion"] == ConverterVersion, "the manifest carries its versions");
+    Require(manifest["bspSha256"] == run.result.sourceHash, "the manifest binds to the BSP bytes");
+
+    const auto& models = manifest["models"];
+    Require(models.size() == 1 && models[0]["path"] == run.result.fileName && models[0]["unitScale"].get<float>() == BSPConversionOptions{}.scaleFactor, "the manifest names the asset and its scale");
+    Require(manifest["files"] == json::array({s_TestLightProbeHeader, s_TestLightProbeAtlas}), "embedded images need no file entry; the light probe files are declared");
+    Require(manifest["graph"] == json::array({json{{"name", "World"}, {"model", 0}, {"role", "world"}}}), "the asset is the world node");
+    Require(manifest["lightProbes"] == json{{"type", "SH9"}, {"header", s_TestLightProbeHeader}, {"atlas", s_TestLightProbeAtlas}}, "the light probes name the declared files");
+    Require(run.result.externalFiles.front().relativePath == s_TestAreaLightPath, "the area light descriptor is in the asset's light probe directory");
+    Require(OutputJSON(run.result, s_TestAreaLightPath)["modelFile"] == "converter_test.glb", "the area light descriptor names the asset beside its directory");
+
+    BSPConversionOptions options;
+    options.format         = OutputFormat::GLTF;
+    options.bEmbedTextures = false;
+    options.scaleFactor    = 0.0254f;
+
+    const auto external         = Convert(file, options);
+    const auto externalManifest = OutputJSON(external.result, s_TestManifestPath);
+    Require(externalManifest["models"][0]["path"] == s_TestGLTFPath && externalManifest["models"][0]["unitScale"].get<float>() == options.scaleFactor, "the manifest names the .gltf asset and the scale");
+    Require(externalManifest["files"] == json::array({s_TestImageWildcard, s_TestLightProbeHeader, s_TestLightProbeAtlas}), "external images are listed by a wildcard");
+
+    //Besides the images: the area light descriptor and the manifest.
+    constexpr std::size_t s_NonImageFileCount = 2;
+
+    const std::string imageDirectory = std::string(s_TestAssetDirectory) + s_ExternalImageDirectory;
+    const auto        images         = std::count_if(external.result.externalFiles.begin(), external.result.externalFiles.end(), [&imageDirectory](const TestOutputFile& output) {
+        return output.relativePath.rfind(imageDirectory, 0) == 0 && output.relativePath.find('/', imageDirectory.size()) == std::string::npos;
+    });
+    Require(images > 0 && static_cast<std::size_t>(images) == external.result.externalFiles.size() - s_NonImageFileCount, "every image is directly under the wildcard's directory");
+
+    //The resource name gives the directory and the file names.
+    ConversionRequest request;
+    request.asset.pFile     = file.data();
+    request.asset.fileBytes = static_cast<std::uint32_t>(file.size());
+    request.resourceName    = "c1a0";
+
+    const auto named = ConvertRequest(request);
+    Require(named.bSuccess && named.fileName == "c1a0/c1a0.glb" && named.externalFiles.back().relativePath == "c1a0.manifest.json", "the resource name gives the layout");
+    Require(OutputJSON(named, "c1a0.manifest.json")["lightProbes"]["header"] == "c1a0/c1a0.sh9/runtime.json", "the light probe paths follow the resource name");
+
+    //A name of dots only would put the asset outside the sink's root, whether given or taken from the identifier.
+    for (const auto* szName : {".", "..", "..."})
+    {
+        request.resourceName = szName;
+
+        const auto rejected = ConvertRequest(request);
+        Require(rejected.error == ConversionError::InvalidRequest && rejected.fileName.empty() && rejected.externalFiles.empty(), "a resource name of dots is rejected before any output");
+    }
+
+    request.resourceName       = "";
+    request.asset.szIdentifier = "maps/..bsp";
+    Require(ConvertRequest(request).error == ConversionError::InvalidRequest, "an identifier giving a name of dots is rejected");
+
+    request.asset.szIdentifier = nullptr;
+    request.resourceName       = "a.b";
+    Require(ConvertRequest(request).fileName == "a.b/a.b.glb", "dots inside a name are kept");
+}
+
 //Output formats and delivery: deterministic GLB, .gltf, external images and the output sink.
 static void TestOutputs()
 {
@@ -1940,14 +2031,14 @@ static void TestOutputs()
     const auto second = Convert(file, {});
     Require(first.result.data == second.result.data && first.result.cacheKey == second.result.cacheKey, "conversions are deterministic");
     Require(first.result.sourceHash.size() == 64 && first.result.cacheKey.find(first.result.sourceHash) != std::string::npos, "the cache key holds the source digest");
-    Require(first.result.fileName == "converter_test.glb", "the file name comes from the identifier");
+    Require(first.result.fileName == s_TestGLBPath, "the file name comes from the identifier, in a directory named after it");
     Require(first.result.converterVersion == ConverterVersion && first.result.extrasSchemaVersion == ExtrasSchemaVersion, "the summary carries the module's versions");
 
     BSPConversionOptions options;
     options.format = OutputFormat::GLTF;
 
     const auto gltf = Convert(file, options);
-    Require(gltf.result.bSuccess && gltf.result.data.front() == '{' && gltf.result.fileName == "converter_test.gltf", ".gltf output");
+    Require(gltf.result.bSuccess && gltf.result.data.front() == '{' && gltf.result.fileName == s_TestGLTFPath, ".gltf output");
 
     const auto parsed = json::parse(gltf.result.data.begin(), gltf.result.data.end());
     Require(parsed["buffers"][0]["uri"].get<std::string>().rfind("data:application/octet-stream;base64,", 0) == 0, "the .gltf buffer is embedded");
@@ -1965,16 +2056,26 @@ static void TestOutputs()
     for (const auto& image : document.gltf["images"])
         Require(image.contains("uri") && !image.contains("bufferView"), "external images are referenced by URI");
 
-    //Whatever the resource name, the images are under textures/ beside the asset.
-    for (const auto& externalFile : external.result.externalFiles)
-        Require(externalFile.relativePath.rfind(s_ExternalImageDirectory, 0) == 0 || externalFile.relativePath == "converter_test.sh9/area-lights.json", "external images and area light sidecar use their adjacent directories");
+    //Whatever the resource name, the images are under textures/ beside the asset, which the URIs name relative to it.
+    const std::string externalImageDirectory = std::string(s_TestAssetDirectory) + s_ExternalImageDirectory;
 
+    for (const auto& externalFile : external.result.externalFiles)
+        Require(externalFile.relativePath.rfind(externalImageDirectory, 0) == 0 || externalFile.relativePath == s_TestAreaLightPath || externalFile.relativePath == s_TestManifestPath,
+                "external images, the area light descriptor and the manifest have their places");
+
+    for (const auto& image : document.gltf["images"])
+        Require(image["uri"].get<std::string>().rfind(s_ExternalImageDirectory, 0) == 0, "image URIs are relative to the asset");
+
+    //The loader tests read the asset with its images beside it, as in the asset directory.
     WriteOutput("external/converter_external.glb", external.result.data);
 
     for (const auto& externalFile : external.result.externalFiles)
-        WriteOutput("external/" + externalFile.relativePath, externalFile.bytes);
+    {
+        if (externalFile.relativePath.rfind(s_TestAssetDirectory, 0) == 0)
+            WriteOutput("external/" + externalFile.relativePath.substr(std::strlen(s_TestAssetDirectory)), externalFile.bytes);
+    }
 
-    //The sink receives the asset, then its images.
+    //The sink receives the asset, then its images, the area light descriptor, and the manifest last.
     std::vector<std::string> sunk;
 
     ConversionRequest request;
@@ -1988,7 +2089,7 @@ static void TestOutputs()
     };
 
     const auto sinkResult = ConvertRequest(request);
-    Require(sinkResult.bSuccess && sinkResult.data.empty() && sunk.size() > 1 && sunk.front() == "sink.glb", "the output sink receives every file");
+    Require(sinkResult.bSuccess && sinkResult.data.empty() && sunk.size() > 1 && sunk.front() == "sink/sink.glb" && sunk.back() == "sink.manifest.json", "the output sink receives every file");
 
     request.outputSink = [](const char*, const std::uint8_t*, std::uint64_t) {
         return false;
@@ -2000,6 +2101,13 @@ static void TestOutputs()
     };
     const auto rejectedArea = ConvertRequest(request);
     Require(rejectedArea.error == ConversionError::OutputFailed && rejectedArea.errorMessage.find("area-lights.json") != std::string::npos, "sidecar rejection fails the conversion and names the file");
+
+    request.outputSink = [](const char* szPath, const std::uint8_t*, std::uint64_t) {
+        return std::string(szPath) != "sink.manifest.json";
+    };
+    const auto rejectedManifest = ConvertRequest(request);
+    Require(rejectedManifest.error == ConversionError::OutputFailed && rejectedManifest.errorMessage.find("sink.manifest.json") != std::string::npos, "manifest rejection fails the conversion and names the file");
+
     request.outputSink = [](const char*, const std::uint8_t*, std::uint64_t) {
         return false;
     };
@@ -2039,6 +2147,7 @@ int main(int argc, char** argv)
     TestBlueShift();
     TestInvalidInput();
     TestOutputs();
+    TestRenderManifest();
 
     std::cout << "UtilGoldSrcAssetConverter BSP tests passed\n";
 

@@ -46,6 +46,18 @@ constexpr char s_UnlitExtension[]            = "KHR_materials_unlit";
 constexpr char s_EmissiveStrengthExtension[] = "KHR_materials_emissive_strength";
 constexpr int  s_NodeNameIndexDigits         = 4;
 
+//Files beside the asset, in <resource>/: the light probe directory <resource>.sh9/ holds the area light descriptor
+//written here and the SH9 files a later bake writes. The render manifest is <resource>.manifest.json beside <resource>/.
+constexpr char s_LightProbeDirectoryExtension[] = ".sh9/";
+constexpr char s_AreaLightFileName[]            = "area-lights.json";
+constexpr char s_LightProbeHeaderFileName[]     = "runtime.json";
+constexpr char s_LightProbeAtlasFileName[]      = "atlas_rgba32f.bin";
+constexpr char s_ManifestExtension[]            = ".manifest.json";
+constexpr char s_ManifestWildcard[]             = "*";
+constexpr char s_ManifestWorldRole[]            = "world";
+constexpr char s_ManifestWorldNodeName[]        = "World";
+constexpr char s_ManifestLightProbeType[]       = "SH9";
+
 //Bytes after the first of a UTF-8 character are 10xxxxxx.
 constexpr unsigned char s_UTF8ContinuationMask = 0xC0;
 constexpr unsigned char s_UTF8ContinuationBits = 0x80;
@@ -186,6 +198,54 @@ static std::string GetResourceName(const BSPConversionRequestView& request)
         name = name.substr(0, extension);
 
     return name.empty() ? std::string(s_DefaultResourceName) : MakeSafeFileName(name);
+}
+
+//The resource name also names the asset's directory, so "." and ".." would leave the sink's root.
+static bool IsValidResourceDirectory(const std::string& resourceName)
+{
+    return resourceName.find_first_not_of('.') != std::string::npos;
+}
+
+//The render manifest of an asset (docs/BSPConversion.md, "Render manifest"). Paths are relative to the manifest's
+//directory, which holds the asset directory. The engine reads the model and the files listed; the light probe files
+//are declared before a bake writes them, so that the manifest stays valid once they exist.
+static nlohmann::json MakeRenderManifest(const BSPConversionOptions& options, const std::string& assetDirectory, const std::string& assetPath, const std::string& lightProbeDirectory, const std::string& sourceDigest, bool bExternalImages)
+{
+    const auto lightProbeHeader = lightProbeDirectory + s_LightProbeHeaderFileName;
+    const auto lightProbeAtlas  = lightProbeDirectory + s_LightProbeAtlasFileName;
+
+    nlohmann::json model;
+    model["path"]      = assetPath;
+    model["unitScale"] = options.scaleFactor;
+
+    nlohmann::json files = nlohmann::json::array();
+
+    if (bExternalImages)
+        files.push_back(assetDirectory + s_ExternalImageDirectory + s_ManifestWildcard);
+
+    files.push_back(lightProbeHeader);
+    files.push_back(lightProbeAtlas);
+
+    nlohmann::json world;
+    world["name"]  = s_ManifestWorldNodeName;
+    world["model"] = 0;
+    world["role"]  = s_ManifestWorldRole;
+
+    nlohmann::json lightProbes;
+    lightProbes["type"]   = s_ManifestLightProbeType;
+    lightProbes["header"] = lightProbeHeader;
+    lightProbes["atlas"]  = lightProbeAtlas;
+
+    nlohmann::json manifest;
+    manifest["schemaVersion"]    = RenderManifestSchemaVersion;
+    manifest["converterVersion"] = ConverterVersion;
+    manifest["bspSha256"]        = sourceDigest;
+    manifest["models"]           = nlohmann::json::array({std::move(model)});
+    manifest["files"]            = std::move(files);
+    manifest["graph"]            = nlohmann::json::array({std::move(world)});
+    manifest["lightProbes"]      = std::move(lightProbes);
+
+    return manifest;
 }
 
 static bool ValidateOptions(const BSPConversionOptions& options, std::string& error)
@@ -1058,6 +1118,11 @@ static void ConvertBSPInternal(const BSPConversionRequestView& request, CConvers
     if (!ValidRequestString(request.szResourceName) || !ValidRequestString(request.szSourcePath))
         return Fail(result, ConversionError::InvalidRequest, "the resource name or the source path is longer than " + std::to_string(MaxConversionStringLength) + " bytes");
 
+    const auto resourceName = GetResourceName(request);
+
+    if (!IsValidResourceDirectory(resourceName))
+        return Fail(result, ConversionError::InvalidRequest, "the resource name \"" + resourceName + "\" cannot name the asset directory");
+
     static const char s_InvalidBSPMessage[] = "the BSP file failed validation (truncated file, lump out of range, invalid index or face)";
 
     BSPConversionSource source;
@@ -1108,8 +1173,7 @@ static void ConvertBSPInternal(const BSPConversionRequestView& request, CConvers
     auto& statistics = result.statistics;
     CountFaces(models, statistics, diagnostics);
 
-    const auto resourceName = GetResourceName(request);
-    const auto fileName     = resourceName + (request.options.format == OutputFormat::GLB ? ".glb" : ".gltf");
+    const auto fileName = resourceName + (request.options.format == OutputFormat::GLB ? ".glb" : ".gltf");
 
     CGLTFDocumentBuilder document(request.options.bEmbedTextures, s_ExternalImageDirectory);
     CBSPTextureConverter textures(source, document, diagnostics);
@@ -1229,19 +1293,32 @@ static void ConvertBSPInternal(const BSPConversionRequestView& request, CConvers
     areaLights["cacheKey"]         = cacheKey;
     areaLights["converterVersion"] = ConverterVersion;
     const auto areaText            = areaLights.dump(2);
-    const auto areaPath            = resourceName + ".sh9/area-lights.json";
 
-    if (!request.pOutputSink->WriteFile(fileName.c_str(), file.data(), file.size()))
-        return Fail(result, ConversionError::OutputFailed, "the output sink rejected " + fileName);
+    //Everything goes into the asset directory, the render manifest beside it, last: it is only written once the files
+    //it names have been accepted.
+    const auto assetDirectory      = resourceName + "/";
+    const auto assetPath           = assetDirectory + fileName;
+    const auto lightProbeDirectory = assetDirectory + resourceName + s_LightProbeDirectoryExtension;
+    const auto areaPath            = lightProbeDirectory + s_AreaLightFileName;
+    const auto manifestPath        = resourceName + s_ManifestExtension;
+    const auto manifestText        = MakeRenderManifest(request.options, assetDirectory, assetPath, lightProbeDirectory, sourceDigest, !document.GetExternalFiles().empty()).dump(2);
+
+    if (!request.pOutputSink->WriteFile(assetPath.c_str(), file.data(), file.size()))
+        return Fail(result, ConversionError::OutputFailed, "the output sink rejected " + assetPath);
 
     for (const auto& external : document.GetExternalFiles())
     {
-        if (!request.pOutputSink->WriteFile(external.relativePath.c_str(), external.bytes.data(), external.bytes.size()))
-            return Fail(result, ConversionError::OutputFailed, "the output sink rejected " + external.relativePath);
+        const auto externalPath = assetDirectory + external.relativePath;
+
+        if (!request.pOutputSink->WriteFile(externalPath.c_str(), external.bytes.data(), external.bytes.size()))
+            return Fail(result, ConversionError::OutputFailed, "the output sink rejected " + externalPath);
     }
 
     if (!request.pOutputSink->WriteFile(areaPath.c_str(), reinterpret_cast<const std::uint8_t*>(areaText.data()), areaText.size()))
         return Fail(result, ConversionError::OutputFailed, "the output sink rejected " + areaPath);
+
+    if (!request.pOutputSink->WriteFile(manifestPath.c_str(), reinterpret_cast<const std::uint8_t*>(manifestText.data()), manifestText.size()))
+        return Fail(result, ConversionError::OutputFailed, "the output sink rejected " + manifestPath);
 
     result.error = ConversionError::None;
 }
