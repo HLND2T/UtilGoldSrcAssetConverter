@@ -208,15 +208,12 @@ static bool IsValidResourceDirectory(const std::string& resourceName)
 
 //The render manifest of an asset (docs/BSPConversion.md, "Render manifest"). Paths are relative to the manifest's
 //directory, which holds the asset directory. The engine reads the model and the files listed; the light probe files
-//are declared before a bake writes them, so that the manifest stays valid once they exist.
+//are declared before a bake writes them, so that the manifest stays valid once they exist. The manifest is also a
+//Donut / RTXPT scene file: models are path strings and graph nodes index them, which is all a scene loader reads.
 static nlohmann::json MakeRenderManifest(const BSPConversionOptions& options, const std::string& assetDirectory, const std::string& assetPath, const std::string& lightProbeDirectory, const std::string& sourceDigest, bool bExternalImages)
 {
     const auto lightProbeHeader = lightProbeDirectory + s_LightProbeHeaderFileName;
     const auto lightProbeAtlas  = lightProbeDirectory + s_LightProbeAtlasFileName;
-
-    nlohmann::json model;
-    model["path"]      = assetPath;
-    model["unitScale"] = options.scaleFactor;
 
     nlohmann::json files = nlohmann::json::array();
 
@@ -240,7 +237,8 @@ static nlohmann::json MakeRenderManifest(const BSPConversionOptions& options, co
     manifest["schemaVersion"]    = RenderManifestSchemaVersion;
     manifest["converterVersion"] = ConverterVersion;
     manifest["bspSha256"]        = sourceDigest;
-    manifest["models"]           = nlohmann::json::array({std::move(model)});
+    manifest["unitScale"]        = options.scaleFactor;
+    manifest["models"]           = nlohmann::json::array({assetPath});
     manifest["files"]            = std::move(files);
     manifest["graph"]            = nlohmann::json::array({std::move(world)});
     manifest["lightProbes"]      = std::move(lightProbes);

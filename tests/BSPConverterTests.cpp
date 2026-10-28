@@ -1956,7 +1956,7 @@ static json OutputJSON(const ConversionResult& result, const std::string& relati
 }
 
 //The render manifest beside the asset directory: the model, its images, the light probe files of a later bake and the
-//world node, with paths relative to the manifest's directory.
+//world node, with paths relative to the manifest's directory. It is also a Donut / RTXPT scene file.
 static void TestRenderManifest()
 {
     const auto file = MakeConverterTestBSP();
@@ -1966,11 +1966,11 @@ static void TestRenderManifest()
     const auto manifest = OutputJSON(run.result, s_TestManifestPath);
     Require(manifest["schemaVersion"] == RenderManifestSchemaVersion && manifest["converterVersion"] == ConverterVersion, "the manifest carries its versions");
     Require(manifest["bspSha256"] == run.result.sourceHash, "the manifest binds to the BSP bytes");
-
-    const auto& models = manifest["models"];
-    Require(models.size() == 1 && models[0]["path"] == run.result.fileName && models[0]["unitScale"].get<float>() == BSPConversionOptions{}.scaleFactor, "the manifest names the asset and its scale");
+    Require(manifest["unitScale"].get<float>() == BSPConversionOptions{}.scaleFactor, "the manifest carries the scale");
+    Require(manifest["models"] == json::array({run.result.fileName}), "the manifest names the asset");
     Require(manifest["files"] == json::array({s_TestLightProbeHeader, s_TestLightProbeAtlas}), "embedded images need no file entry; the light probe files are declared");
     Require(manifest["graph"] == json::array({json{{"name", "World"}, {"model", 0}, {"role", "world"}}}), "the asset is the world node");
+    Require(manifest["models"][0].is_string() && manifest["graph"][0]["model"].is_number_unsigned(), "a scene loader reads models as paths and graph models as unsigned indices");
     Require(manifest["lightProbes"] == json{{"type", "SH9"}, {"header", s_TestLightProbeHeader}, {"atlas", s_TestLightProbeAtlas}}, "the light probes name the declared files");
     Require(run.result.externalFiles.front().relativePath == s_TestAreaLightPath, "the area light descriptor is in the asset's light probe directory");
     Require(OutputJSON(run.result, s_TestAreaLightPath)["modelFile"] == "converter_test.glb", "the area light descriptor names the asset beside its directory");
@@ -1982,7 +1982,7 @@ static void TestRenderManifest()
 
     const auto external         = Convert(file, options);
     const auto externalManifest = OutputJSON(external.result, s_TestManifestPath);
-    Require(externalManifest["models"][0]["path"] == s_TestGLTFPath && externalManifest["models"][0]["unitScale"].get<float>() == options.scaleFactor, "the manifest names the .gltf asset and the scale");
+    Require(externalManifest["models"] == json::array({s_TestGLTFPath}) && externalManifest["unitScale"].get<float>() == options.scaleFactor, "the manifest names the .gltf asset and the scale");
     Require(externalManifest["files"] == json::array({s_TestImageWildcard, s_TestLightProbeHeader, s_TestLightProbeAtlas}), "external images are listed by a wildcard");
 
     //Besides the images: the area light descriptor and the manifest.
