@@ -5,17 +5,24 @@
 //                           [--wad <file.wad>]... [--wad-dir <directory>] [--gltf] [--blueshift] [--external-textures]
 //                           [--visibility] [--collision] [--scale <factor>] [--emissive-scale <factor>]
 //                           [--point-light-intensity-scale <factor>] [--environment-light-intensity-scale <factor>]
+//                           [--no-sky-box] [--sky-radiance-scale <factor>]
 //
 //Without -basedir, <map> and the WAD files are paths of the local file system. With -basedir, the tool loads
 //filesystem_stdio.dll from beside the executable and mounts the game's search paths as the engine does (see
 //MountGameSearchPaths): <map> is a path relative to them, or a map name looked up as maps/<name>.bsp, and the WAD files
-//the worldspawn's "wad" key lists are found through them.
+//the worldspawn's "wad" key lists are found through them, as are the sky box images gfx/env/<skyname><suffix>.
 //Textures come from the BSP's embedded miptexes, then from the worldspawn's WAD files, then from the WAD files given
 //(every *.wad of --wad-dir, in name order), searched in order. Outputs are written into a directory named after the map
 //in the output directory (the current one by default), with the render manifest beside it: maps/c1a0.bsp gives
 //c1a0/c1a0.glb, c1a0/textures/ with --external-textures, and c1a0.manifest.json.
 #include "IUtilGoldSrcAssetConverter.h"
 #include "FileSystem.h"
+
+//Sky images are TGA or BMP files, as the engine reads them.
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_TGA
+#define STBI_ONLY_BMP
+#include "stb_image.h"
 
 #include <algorithm>
 #include <cctype>
@@ -47,6 +54,9 @@ static const char s_FileSystemModuleName[] = "filesystem_stdio.so";
 
 //The game the engine always mounts after the one it runs (its default game directory).
 static const char s_DefaultGame[] = "valve";
+
+//Channels of the RGBA8 images given to the converter.
+constexpr int s_RGBAChannels = 4;
 
 //BSP30 header: the version, then a table of lumps, each an offset and a length. Blue Shift swaps the entity lump with the
 //plane lump.
@@ -119,9 +129,12 @@ static int Usage()
                  "                                [--wad <file.wad>]... [--wad-dir <directory>] [--gltf] [--blueshift] [--external-textures]\n"
                  "                                [--visibility] [--collision] [--scale <factor>] [--emissive-scale <factor>]\n"
                  "                                [--point-light-intensity-scale <factor>] [--environment-light-intensity-scale <factor>]\n"
+                 "                                [--no-sky-box] [--sky-radiance-scale <factor>]\n"
                  "  --emissive-scale: texture emission multiplier (default 4; 0 disables emission)\n"
                  "  --point-light-intensity-scale: point light multiplier (default 1; 0 keeps entities without lights)\n"
-                 "  --environment-light-intensity-scale: light_environment sun multiplier in lux (default 3; 0 keeps entities without lights)\n"
+                 "  --environment-light-intensity-scale: light_environment sun multiplier in lux (default 0.2; 0 keeps entities without lights)\n"
+                 "  --no-sky-box: export neither the sky box nor its cube map (sky images come from -basedir's gfx/env)\n"
+                 "  --sky-radiance-scale: radiance of a white sky texel in the manifest's environment light (default 2)\n"
                  "  --no-area-lights: write an empty area light sidecar\n"
                  "  --area-lights-per-group <1-64>: rectangle budget per emitter (default 16)\n";
 
@@ -399,17 +412,25 @@ static std::string GetGameMapPath(const std::string& map)
     return "maps/" + map + ".bsp";
 }
 
-//Miptex requests are looked up in the WAD files in order; detail and skybox images are not resolved.
+//Extensions of a sky image the tool decodes, in the order the engine tries them (R_LoadSkys); the engine tries a DDS
+//image first, which the tool does not decode.
+static const char* const s_SkyImageExtensions[] = {"tga", "bmp"};
+
+//Miptex requests are looked up in the WAD files in order. With the game's file system, skybox faces are the images
+//gfx/env/<name>.tga or .bmp, decoded to RGBA8; detail images are not resolved.
 class CWADTextureResolver final : public ITextureResolver
 {
 public:
-    CWADTextureResolver(IUtilGoldSrcAssetConverter* pConverter, const std::vector<std::vector<std::uint8_t>>& wads) :
-        m_pConverter(pConverter), m_Wads(wads)
+    CWADTextureResolver(IUtilGoldSrcAssetConverter* pConverter, const std::vector<std::vector<std::uint8_t>>& wads, IFileSystem* pFileSystem) :
+        m_pConverter(pConverter), m_Wads(wads), m_pFileSystem(pFileSystem)
     {
     }
 
     bool ResolveTexture(const TextureRequest& request, ResolvedTexture* pTexture) noexcept override
     {
+        if (request.kind == TextureKind::SkyboxFace)
+            return ResolveSkyboxFace(request.szName, *pTexture);
+
         if (request.kind != TextureKind::Miptex)
             return false;
 
@@ -423,8 +444,50 @@ public:
     }
 
 private:
+    bool ResolveSkyboxFace(const char* szName, ResolvedTexture& texture) noexcept
+    {
+        if (!m_pFileSystem)
+            return false;
+
+        try
+        {
+            for (const auto* szExtension : s_SkyImageExtensions)
+            {
+                std::vector<std::uint8_t> file;
+
+                if (!ReadGameFile(m_pFileSystem, std::string("gfx/env/") + szName + "." + szExtension, file) || file.empty() || file.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+                    continue;
+
+                int  width{};
+                int  height{};
+                int  channels{};
+                auto pTexels = std::unique_ptr<stbi_uc, decltype(&stbi_image_free)>(stbi_load_from_memory(file.data(), static_cast<int>(file.size()), &width, &height, &channels, s_RGBAChannels), &stbi_image_free);
+
+                if (!pTexels)
+                    continue;
+
+                m_Texels.assign(pTexels.get(), pTexels.get() + static_cast<std::size_t>(width) * height * s_RGBAChannels);
+
+                texture.format    = ResolvedTextureFormat::RGBA8;
+                texture.width     = static_cast<std::uint32_t>(width);
+                texture.height    = static_cast<std::uint32_t>(height);
+                texture.pData     = m_Texels.data();
+                texture.dataBytes = m_Texels.size();
+
+                return true;
+            }
+        }
+        catch (const std::bad_alloc&)
+        {
+        }
+
+        return false;
+    }
+
     IUtilGoldSrcAssetConverter*                   m_pConverter{};
     const std::vector<std::vector<std::uint8_t>>& m_Wads;
+    IFileSystem*                                  m_pFileSystem{};
+    std::vector<std::uint8_t>                     m_Texels;
 };
 
 //Writes every file under the output directory and remembers the asset's path, the first file written, and the
@@ -543,6 +606,8 @@ int main(int argc, char** argv)
             request.options.bEmbedBSPCollisionData = true;
         else if (argument == "--no-area-lights")
             request.options.bExportAreaLights = false;
+        else if (argument == "--no-sky-box")
+            request.options.bExportSkyBox = false;
         else if (argument == "--area-lights-per-group" && bValue)
         {
             const auto* szValue = argv[++i];
@@ -555,7 +620,7 @@ int main(int argc, char** argv)
         }
         else if (argument == "--scale" && bValue)
             request.options.scaleFactor = std::strtof(argv[++i], nullptr);
-        else if ((argument == "--emissive-scale" || argument == "--point-light-intensity-scale" || argument == "--environment-light-intensity-scale") && bValue)
+        else if ((argument == "--emissive-scale" || argument == "--point-light-intensity-scale" || argument == "--environment-light-intensity-scale" || argument == "--sky-radiance-scale") && bValue)
         {
             const auto* szValue = argv[++i];
             char*       pEnd{};
@@ -572,8 +637,10 @@ int main(int argc, char** argv)
                 request.options.emissiveScale = scale;
             else if (argument == "--point-light-intensity-scale")
                 request.options.pointLightIntensityScale = scale;
-            else
+            else if (argument == "--environment-light-intensity-scale")
                 request.options.environmentLightIntensityScale = scale;
+            else
+                request.options.skyRadianceScale = scale;
         }
         else if (input.empty() && argument[0] != '-')
             input = argument;
@@ -643,7 +710,7 @@ int main(int argc, char** argv)
     const auto sourcePath   = std::filesystem::u8path(mapPath).generic_u8string();
 
     //The converter puts the asset into a directory named after the resource, and the manifest beside it.
-    CWADTextureResolver    resolver(pConverter, wads);
+    CWADTextureResolver    resolver(pConverter, wads, pFileSystem);
     CDirectoryOutputSink   outputSink(outputDirectory);
     CConsoleDiagnosticSink diagnosticSink;
 

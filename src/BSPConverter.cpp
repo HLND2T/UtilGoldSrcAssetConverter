@@ -67,6 +67,9 @@ constexpr char s_ManifestExtension[]            = ".manifest.json";
 constexpr char s_ManifestWorldRole[]            = "world";
 constexpr char s_ManifestWorldNodeName[]        = "World";
 constexpr char s_ManifestLightProbeType[]       = "SH9";
+constexpr char s_ManifestSkyNodeName[]          = "Sky";
+constexpr char s_ManifestEnvironmentLightType[] = "EnvironmentLight";
+constexpr char s_SkyEnvironmentMapExtension[]   = ".sky.dds";
 
 //Bytes after the first of a UTF-8 character are 10xxxxxx.
 constexpr unsigned char s_UTF8ContinuationMask = 0xC0;
@@ -220,8 +223,9 @@ static bool IsValidResourceDirectory(const std::string& resourceName)
 //directory, which holds the asset directory. A renderer reads the model and, through it, its buffers and images; the
 //light probe files are named before a bake writes them, so that the manifest stays valid once they exist. The manifest
 //is also a Donut / RTXPT scene file: models are path strings and graph nodes index them, which is all a scene loader
-//reads.
-static nlohmann::json MakeRenderManifest(const BSPConversionOptions& options, const std::string& assetPath, const std::string& lightProbeDirectory, const std::string& sourceDigest)
+//reads. With the sky box, the sky node is the scene's environment light: the sky's cube map, whose texels times
+//skyRadianceScale are the radiance seen in the directions they show.
+static nlohmann::json MakeRenderManifest(const BSPConversionOptions& options, const std::string& assetPath, const std::string& lightProbeDirectory, const std::string& environmentMapPath, const std::string& sourceDigest)
 {
     const auto lightProbeHeader = lightProbeDirectory + s_LightProbeHeaderFileName;
     const auto lightProbeAtlas  = lightProbeDirectory + s_LightProbeAtlasFileName;
@@ -244,6 +248,17 @@ static nlohmann::json MakeRenderManifest(const BSPConversionOptions& options, co
     manifest["models"]           = nlohmann::json::array({assetPath});
     manifest["graph"]            = nlohmann::json::array({std::move(world)});
     manifest["lightProbes"]      = std::move(lightProbes);
+
+    if (!environmentMapPath.empty())
+    {
+        nlohmann::json sky;
+        sky["name"]          = s_ManifestSkyNodeName;
+        sky["type"]          = s_ManifestEnvironmentLightType;
+        sky["path"]          = environmentMapPath;
+        sky["radianceScale"] = nlohmann::json::array({options.skyRadianceScale, options.skyRadianceScale, options.skyRadianceScale});
+
+        manifest["graph"].push_back(std::move(sky));
+    }
 
     return manifest;
 }
@@ -283,6 +298,12 @@ static bool ValidateOptions(const BSPConversionOptions& options, std::string& er
     if (!std::isfinite(options.environmentLightIntensityScale) || options.environmentLightIntensityScale < 0)
     {
         error = "the environment light intensity scale must be finite and nonnegative";
+        return false;
+    }
+
+    if (!std::isfinite(options.skyRadianceScale) || options.skyRadianceScale < 0)
+    {
+        error = "the sky radiance scale must be finite and nonnegative";
         return false;
     }
 
@@ -1124,9 +1145,12 @@ static std::string MakeOptionsKey(const BSPConversionOptions& options)
     std::memcpy(&pointLightBits, &options.pointLightIntensityScale, sizeof(pointLightBits));
     std::uint32_t environmentLightBits{};
     std::memcpy(&environmentLightBits, &options.environmentLightIntensityScale, sizeof(environmentLightBits));
+    std::uint32_t skyBits{};
+    std::memcpy(&skyBits, &options.skyRadianceScale, sizeof(skyBits));
 
     const bool flags[] = {options.bPreserveSkyGeometry, options.bPreserveBrushEntities, options.bPreservePointEntities, options.bPreserveLightmaps, options.bPreserveLightstyles,
-                          options.bPreserveSurfaceMetadata, options.bPreserveEntityKeyValues, options.bEmbedTextures, options.bEmbedBSPVisibilityData, options.bEmbedBSPCollisionData};
+                          options.bPreserveSurfaceMetadata, options.bPreserveEntityKeyValues, options.bEmbedTextures, options.bEmbedBSPVisibilityData, options.bEmbedBSPCollisionData,
+                          options.bExportSkyBox};
 
     std::string key = options.format == OutputFormat::GLB ? "glb;" : "gltf;";
 
@@ -1141,8 +1165,10 @@ static std::string MakeOptionsKey(const BSPConversionOptions& options)
     std::snprintf(szPointLight, sizeof(szPointLight), "%08x", pointLightBits);
     char szEnvironmentLight[sizeof(environmentLightBits) * 2 + 1]{};
     std::snprintf(szEnvironmentLight, sizeof(szEnvironmentLight), "%08x", environmentLightBits);
+    char szSky[sizeof(skyBits) * 2 + 1]{};
+    std::snprintf(szSky, sizeof(szSky), "%08x", skyBits);
 
-    return key + ";scale=" + szScale + ";emissive=" + szEmissive + ";pointLight=" + szPointLight + ";environmentLight=" + szEnvironmentLight +
+    return key + ";scale=" + szScale + ";emissive=" + szEmissive + ";pointLight=" + szPointLight + ";environmentLight=" + szEnvironmentLight + ";sky=" + szSky +
         ";areaLights=" + (options.bExportAreaLights ? "1" : "0") + ";areaBudget=" + std::to_string(options.maxAreaLightsPerGroup);
 }
 
@@ -1326,7 +1352,6 @@ static void ConvertBSPInternal(const BSPConversionRequestView& request, CConvers
     statistics.entityCount          = static_cast<std::uint32_t>(source.entities.size());
     statistics.brushEntityNodeCount = nodes.brushEntityNodes;
     statistics.pointEntityNodeCount = nodes.pointEntityNodes;
-    statistics.materialCount        = static_cast<std::uint32_t>(materials.GetKeys().size());
 
     nlohmann::json texInfos = nlohmann::json::array();
 
@@ -1357,21 +1382,14 @@ static void ConvertBSPInternal(const BSPConversionRequestView& request, CConvers
     goldsrc["texInfos"]         = std::move(texInfos);
     goldsrc["lightmaps"]        = lightmaps;
 
-    //The sky geometry is kept whatever the skybox images, which only the resolver can provide.
-    if (worldspawn < source.entities.size())
-    {
-        if (const auto* pSkyName = source.entities[worldspawn].FindValue("skyname"))
-        {
-            nlohmann::json sky;
-            sky["skyname"]   = MakeJSONString(*pSkyName, bLatin1);
-            sky["faceOrder"] = nlohmann::json::array({"rt", "bk", "lf", "ft", "up", "dn"});
+    //The sky box comes from the resolver's images; the sky faces are kept whatever they are.
+    const auto environmentMapName = resourceName + s_SkyEnvironmentMapExtension;
+    auto       sky                = AddSkyBox(source, worldspawn, environmentMapName, textures, document, statistics);
 
-            if (request.pTextureResolver && !pSkyName->empty())
-                sky["faceTextures"] = textures.GetSkyboxTextures(*pSkyName);
+    if (!sky.extras.is_null())
+        goldsrc["sky"] = std::move(sky.extras);
 
-            goldsrc["sky"] = std::move(sky);
-        }
-    }
+    statistics.materialCount = static_cast<std::uint32_t>(document.GetModel().materials.size());
 
     const auto spatial = AppendBSPSpatialData(source, document, statistics);
 
@@ -1431,8 +1449,9 @@ static void ConvertBSPInternal(const BSPConversionRequestView& request, CConvers
     const auto assetPath           = assetDirectory + fileName;
     const auto lightProbeDirectory = assetDirectory + resourceName + s_LightProbeDirectoryExtension;
     const auto areaPath            = lightProbeDirectory + s_AreaLightFileName;
+    const auto environmentMapPath  = sky.environmentMap.empty() ? std::string() : assetDirectory + environmentMapName;
     const auto manifestPath        = resourceName + s_ManifestExtension;
-    const auto manifestText        = MakeRenderManifest(request.options, assetPath, lightProbeDirectory, sourceDigest).dump(2);
+    const auto manifestText        = MakeRenderManifest(request.options, assetPath, lightProbeDirectory, environmentMapPath, sourceDigest).dump(2);
 
     if (!request.pOutputSink->WriteFile(assetPath.c_str(), file.data(), file.size()))
         return Fail(result, ConversionError::OutputFailed, "the output sink rejected " + assetPath);
@@ -1444,6 +1463,9 @@ static void ConvertBSPInternal(const BSPConversionRequestView& request, CConvers
         if (!request.pOutputSink->WriteFile(externalPath.c_str(), external.bytes.data(), external.bytes.size()))
             return Fail(result, ConversionError::OutputFailed, "the output sink rejected " + externalPath);
     }
+
+    if (!environmentMapPath.empty() && !request.pOutputSink->WriteFile(environmentMapPath.c_str(), sky.environmentMap.data(), sky.environmentMap.size()))
+        return Fail(result, ConversionError::OutputFailed, "the output sink rejected " + environmentMapPath);
 
     if (!request.pOutputSink->WriteFile(areaPath.c_str(), reinterpret_cast<const std::uint8_t*>(areaText.data()), areaText.size()))
         return Fail(result, ConversionError::OutputFailed, "the output sink rejected " + areaPath);

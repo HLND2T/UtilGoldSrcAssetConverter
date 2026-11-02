@@ -124,6 +124,7 @@ add_library(UtilGoldSrcAssetConverterCore STATIC
   src/BSPGeometryConverter.cpp
   src/BSPLightmapConverter.cpp
   src/BSPMetadataWriter.cpp
+  src/BSPSkyBoxConverter.cpp
   src/BSPSkyGeometryExtractor.cpp
   src/BSPSpatialDataWriter.cpp
   src/BSPTextureConverter.cpp
@@ -161,6 +162,7 @@ if(UTILGOLDSRCASSETCONVERTER_BUILD_CLI)
     tools/GoldSrcAssetConverterCLI.cpp
     "${UTILGOLDSRCASSETCONVERTER_INTERFACE_DIR}/interface.cpp")
   target_compile_features(GoldSrcAssetConverterCLI PRIVATE cxx_std_17)
+  target_include_directories(GoldSrcAssetConverterCLI PRIVATE "${STB_SOURCE_PATH}")
   target_link_libraries(GoldSrcAssetConverterCLI PRIVATE UtilGoldSrcAssetConverterInterface)
   if(NOT WIN32)
     target_link_libraries(GoldSrcAssetConverterCLI PRIVATE ${CMAKE_DL_LIBS})
