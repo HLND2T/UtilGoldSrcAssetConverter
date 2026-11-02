@@ -25,6 +25,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace GoldSrcConverterTest;
@@ -799,6 +800,373 @@ static void TestSkyGeometry()
     ConversionRun noSkyRun;
     const auto    noSky = ConvertAndParse(MakeConverterTestBSP(), options, noSkyRun);
     Require(ModelMesh(noSky, 0, "sky") < 0 && noSky.Goldsrc()["models"][0]["omittedSkyFaces"] == json::array({TestBSPSkyFace}), "omitted sky faces are listed");
+}
+
+//Sky box images: every texel of the six faces has its own color, red and green from its column and row, blue from its
+//face, so that a sampled texel tells where it comes from.
+constexpr std::uint32_t s_SkyImageSize   = 4;
+constexpr std::uint8_t  s_SkyTexelStep   = 50;
+constexpr std::uint8_t  s_SkyFaceStep    = 40;
+constexpr std::uint32_t s_SkyFaceCount   = 6;
+constexpr std::uint32_t s_SkyUpFace      = 4;
+constexpr std::uint8_t  s_SkyOpaqueAlpha = std::numeric_limits<std::uint8_t>::max();
+constexpr double        s_SkyHalfTexel   = 0.5;
+//The engine's default sky box: faces sv_zmax (4096 by default) * 0.57735 away from the view.
+constexpr double s_SkyFarDistance      = 4096;
+constexpr double s_SkyBoxDistanceScale = 0.57735;
+constexpr double s_SkyHalfExtent       = s_SkyFarDistance * s_SkyBoxDistanceScale;
+constexpr char   s_TestSkyDDSPath[]    = "converter_test/converter_test.sky.dds";
+//The default radiance of a white sky texel in the manifest's environment light.
+constexpr float s_DefaultSkyRadianceScale = 2.0f;
+
+static const char* const s_SkyFaceSuffixes[s_SkyFaceCount] = {"rt", "bk", "lf", "ft", "up", "dn"};
+
+static std::vector<std::uint8_t> MakeSkyFaceImage(std::uint32_t face)
+{
+    std::vector<std::uint8_t> texels(s_SkyImageSize * s_SkyImageSize * GoldSrcRender::RGBABytes);
+
+    for (std::uint32_t y = 0; y < s_SkyImageSize; ++y)
+    {
+        for (std::uint32_t x = 0; x < s_SkyImageSize; ++x)
+        {
+            auto* pTexel = texels.data() + (y * s_SkyImageSize + x) * GoldSrcRender::RGBABytes;
+            pTexel[0]    = static_cast<std::uint8_t>(x * s_SkyTexelStep);
+            pTexel[1]    = static_cast<std::uint8_t>(y * s_SkyTexelStep);
+            pTexel[2]    = static_cast<std::uint8_t>((face + 1) * s_SkyFaceStep);
+            pTexel[3]    = s_SkyOpaqueAlpha;
+        }
+    }
+
+    return texels;
+}
+
+//The engine's sky box faces in GoldSrc axes, rt bk lf ft up dn, as GoldSrc draws them seen from inside the box: the
+//axis a face faces, and the axes along which its image's columns and rows advance.
+struct TestCubeFace
+{
+    Vec3 forward;
+    Vec3 right;
+    Vec3 down;
+};
+
+static const TestCubeFace s_TestSkyFaces[s_SkyFaceCount] = {
+    {{1, 0, 0}, {0, -1, 0}, {0, 0, -1}},
+    {{0, 1, 0}, {1, 0, 0}, {0, 0, -1}},
+    {{-1, 0, 0}, {0, 1, 0}, {0, 0, -1}},
+    {{0, -1, 0}, {-1, 0, 0}, {0, 0, -1}},
+    {{0, 0, 1}, {0, -1, 0}, {1, 0, 0}},
+    {{0, 0, -1}, {0, -1, 0}, {-1, 0, 0}}};
+
+static double DotVec3(const Vec3& a, const Vec3& b)
+{
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+//Converts with a resolver that serves the sky box faces of servedSky, except skippedFace, and records every request.
+static ConversionRun ConvertWithSky(const std::vector<std::uint8_t>& file, const BSPConversionOptions& options, const std::string& servedSky, std::uint32_t skippedFace = s_SkyFaceCount)
+{
+    static std::vector<std::vector<std::uint8_t>> s_Images;
+
+    if (s_Images.empty())
+    {
+        for (std::uint32_t face = 0; face < s_SkyFaceCount; ++face)
+            s_Images.push_back(MakeSkyFaceImage(face));
+    }
+
+    ConversionRun run;
+
+    ConversionRequest request;
+    request.asset.szIdentifier = "maps/converter_test.bsp";
+    request.asset.pFile        = file.data();
+    request.asset.fileBytes    = static_cast<std::uint32_t>(file.size());
+    request.options            = options;
+    request.textureResolver    = [&](const TextureRequest& textureRequest, ResolvedTexture& texture) {
+        run.requested.push_back(textureRequest.szName);
+
+        for (std::uint32_t face = 0; face < s_SkyFaceCount; ++face)
+        {
+            if (textureRequest.kind != TextureKind::SkyboxFace || face == skippedFace || servedSky + s_SkyFaceSuffixes[face] != textureRequest.szName)
+                continue;
+
+            texture.format    = ResolvedTextureFormat::RGBA8;
+            texture.width     = s_SkyImageSize;
+            texture.height    = s_SkyImageSize;
+            texture.pData     = s_Images[face].data();
+            texture.dataBytes = s_Images[face].size();
+            return true;
+        }
+
+        return false;
+    };
+
+    run.result = ConvertRequest(request);
+
+    return run;
+}
+
+static const TestOutputFile* FindOutput(const ConversionResult& result, const std::string& relativePath)
+{
+    for (const auto& file : result.externalFiles)
+    {
+        if (file.relativePath == relativePath)
+            return &file;
+    }
+
+    return nullptr;
+}
+
+//DDS cube map written by the converter: DDS_HEADER, then DDS_HEADER_DXT10, then the six faces of RGBA8 texels.
+constexpr std::size_t   s_DDSMagicBytes   = 4;
+constexpr std::size_t   s_DDSHeaderBytes  = 124;
+constexpr std::size_t   s_DDSDX10Bytes    = 20;
+constexpr std::size_t   s_DDSDataOffset   = s_DDSMagicBytes + s_DDSHeaderBytes + s_DDSDX10Bytes;
+constexpr std::size_t   s_DDSWidthOffset  = 16;
+constexpr std::size_t   s_DDSHeightOffset = 12;
+constexpr std::size_t   s_DDSFourCCOffset = 84;
+constexpr std::size_t   s_DDSCaps2Offset  = 112;
+constexpr std::size_t   s_DDSFormatOffset = 128;
+constexpr std::size_t   s_DDSMiscOffset   = 136;
+constexpr std::uint32_t s_DDSMagic        = 0x20534444;
+constexpr std::uint32_t s_DDSFourCCDX10   = 0x30315844;
+constexpr std::uint32_t s_DDSCubeAllFaces = 0xFE00;
+constexpr std::uint32_t s_DXGIRGBA8SRGB   = 29;
+constexpr std::uint32_t s_D3D10MiscCube   = 0x4;
+
+//The face and texel of a Direct3D cube map that a direction samples, with the major axis and face coordinates of the
+//Direct3D specification (sc, tc and ma of each face), at the nearest texel.
+static std::tuple<std::uint32_t, std::uint32_t, std::uint32_t> CubeMapTexel(const Vec3& direction, std::uint32_t size)
+{
+    const auto ax = std::fabs(direction.x);
+    const auto ay = std::fabs(direction.y);
+    const auto az = std::fabs(direction.z);
+
+    std::uint32_t face{};
+    double        sc{};
+    double        tc{};
+    double        ma{};
+
+    if (ax >= ay && ax >= az)
+    {
+        face = direction.x > 0 ? 0 : 1;
+        sc   = direction.x > 0 ? -direction.z : direction.z;
+        tc   = -direction.y;
+        ma   = ax;
+    }
+    else if (ay >= az)
+    {
+        face = direction.y > 0 ? 2 : 3;
+        sc   = direction.x;
+        tc   = direction.y > 0 ? direction.z : -direction.z;
+        ma   = ay;
+    }
+    else
+    {
+        face = direction.z > 0 ? 4 : 5;
+        sc   = direction.z > 0 ? direction.x : -direction.x;
+        tc   = -direction.y;
+        ma   = az;
+    }
+
+    const auto texel = [size](double coordinate) {
+        return std::min(static_cast<std::uint32_t>((coordinate + 1) / 2 * size), size - 1);
+    };
+
+    return {face, texel(sc / ma), texel(tc / ma)};
+}
+
+//Every texel of every sky box face is found where a renderer sampling the cube map with the scene direction of its
+//center looks: the GoldSrc direction (x, y, z) is (x, z, -y) in the scene.
+static void RequireCubeMapShowsSky(const std::vector<std::uint8_t>& dds, std::uint32_t skippedFace)
+{
+    Require(dds.size() == s_DDSDataOffset + s_SkyFaceCount * s_SkyImageSize * s_SkyImageSize * GoldSrcRender::RGBABytes, "the cube map holds six faces of the images' size");
+    Require(ReadUInt32(dds, 0) == s_DDSMagic && ReadUInt32(dds, s_DDSWidthOffset) == s_SkyImageSize && ReadUInt32(dds, s_DDSHeightOffset) == s_SkyImageSize, "a DDS file of the images' size");
+    Require(ReadUInt32(dds, s_DDSFourCCOffset) == s_DDSFourCCDX10 && ReadUInt32(dds, s_DDSCaps2Offset) == s_DDSCubeAllFaces, "a DX10 cube map with every face");
+    Require(ReadUInt32(dds, s_DDSFormatOffset) == s_DXGIRGBA8SRGB && ReadUInt32(dds, s_DDSMiscOffset) == s_D3D10MiscCube, "RGBA8 sRGB texels of a texture cube");
+
+    for (std::uint32_t face = 0; face < s_SkyFaceCount; ++face)
+    {
+        const auto  image = MakeSkyFaceImage(face);
+        const auto& axes  = s_TestSkyFaces[face];
+
+        for (std::uint32_t y = 0; y < s_SkyImageSize; ++y)
+        {
+            for (std::uint32_t x = 0; x < s_SkyImageSize; ++x)
+            {
+                const auto s = (2.0 * x + 1) / s_SkyImageSize - 1;
+                const auto t = (2.0 * y + 1) / s_SkyImageSize - 1;
+                const Vec3 goldsrc{axes.forward.x + s * axes.right.x + t * axes.down.x, axes.forward.y + s * axes.right.y + t * axes.down.y, axes.forward.z + s * axes.right.z + t * axes.down.z};
+
+                const auto [cubeFace, cubeX, cubeY] = CubeMapTexel({goldsrc.x, goldsrc.z, -goldsrc.y}, s_SkyImageSize);
+
+                const auto* pCube   = dds.data() + s_DDSDataOffset + ((cubeFace * s_SkyImageSize + cubeY) * s_SkyImageSize + cubeX) * GoldSrcRender::RGBABytes;
+                const auto* pSource = image.data() + (y * s_SkyImageSize + x) * GoldSrcRender::RGBABytes;
+                const bool  bBlack  = face == skippedFace;
+
+                for (std::uint32_t c = 0; c < GoldSrcRender::RGBABytes - 1; ++c)
+                    Require(pCube[c] == (bBlack ? 0 : pSource[c]), "the cube map shows each sky box texel in its scene direction, a face without image black");
+            }
+        }
+    }
+}
+
+//The Sky_Box mesh: a quad per face at the box's distance, seen from inside with its normal toward the center, whose
+//texture coordinates follow the face's image axes half a texel inside its edges, and an unlit material showing the
+//face's image (black without one), clamped to its edges.
+static void RequireSkyBoxMesh(const Document& document, const json& sky, std::uint32_t skippedFace)
+{
+    const auto& gltf     = document.gltf;
+    const auto& mesh     = gltf["meshes"][sky["box"]["mesh"].get<int>()];
+    const auto& textures = sky["faceTextures"];
+    const auto  inset    = s_SkyHalfTexel / s_SkyImageSize;
+    const auto  texCoord = [inset](double coordinate) {
+        return inset + (1 - 2 * inset) * (coordinate + 1) / 2;
+    };
+
+    Require(mesh["primitives"].size() == s_SkyFaceCount, "a primitive per face");
+
+    for (std::uint32_t face = 0; face < s_SkyFaceCount; ++face)
+    {
+        const auto& primitive = mesh["primitives"][face];
+        const auto& material  = gltf["materials"][primitive["material"].get<int>()];
+        const auto& axes      = s_TestSkyFaces[face];
+        const bool  bImage    = face != skippedFace;
+
+        Require(material["extensions"].contains("KHR_materials_unlit") && material["extras"]["goldsrc"]["surfaceType"] == "skybox" && material["extras"]["goldsrc"]["skyFace"] == s_SkyFaceSuffixes[face], "an unlit sky box material per face");
+        Require(material["extras"]["goldsrc"]["missingTexture"] == !bImage && (textures[face].get<int>() >= 0) == bImage, "faces without image are marked");
+
+        if (bImage)
+        {
+            const auto& texture = gltf["textures"][material["pbrMetallicRoughness"]["baseColorTexture"]["index"].get<int>()];
+            const auto& sampler = gltf["samplers"][texture["sampler"].get<int>()];
+            Require(material["pbrMetallicRoughness"]["baseColorTexture"]["index"] == textures[face], "the material shows the face's texture");
+            Require(sampler["wrapS"] == TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE && sampler["wrapT"] == TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE, "sky box images clamp to their edges");
+        }
+        else
+            Require(!material["pbrMetallicRoughness"].contains("baseColorTexture") && material["pbrMetallicRoughness"]["baseColorFactor"] == json::array({0.0, 0.0, 0.0, 1.0}), "a face without image is black");
+
+        const auto positions = ReadFloats(document, primitive["attributes"]["POSITION"].get<int>(), 3);
+        const auto normals   = ReadFloats(document, primitive["attributes"]["NORMAL"].get<int>(), 3);
+        const auto uvs       = ReadFloats(document, primitive["attributes"]["TEXCOORD_0"].get<int>(), 2);
+
+        for (std::size_t v = 0; v < positions.size() / 3; ++v)
+        {
+            const Vec3 position{positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2]};
+            const Vec3 normal{normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2]};
+
+            Require(std::fabs(DotVec3(position, axes.forward) - s_SkyHalfExtent) < s_PositionTolerance && Near(normal, {-axes.forward.x, -axes.forward.y, -axes.forward.z}), "the face lies at the box's distance, facing the center");
+
+            if (bImage)
+            {
+                Require(std::fabs(uvs[v * 2] - texCoord(DotVec3(position, axes.right) / s_SkyHalfExtent)) < s_UnitTolerance, "image columns follow the face's right axis");
+                Require(std::fabs(uvs[v * 2 + 1] - texCoord(DotVec3(position, axes.down) / s_SkyHalfExtent)) < s_UnitTolerance, "image rows follow the face's down axis");
+            }
+        }
+    }
+}
+
+static json OutputJSON(const ConversionResult& result, const std::string& relativePath);
+
+static std::vector<std::uint8_t> MakeBSPWithWorldspawnSky(const std::string& skyField)
+{
+    static const std::string s_SkyField = "\"skyname\" \"desert\"\n";
+
+    auto       entities = std::string(ConverterTestEntities);
+    const auto position = entities.find(s_SkyField);
+    Require(position != std::string::npos, "the test worldspawn names its sky");
+    entities.replace(position, s_SkyField.size(), skyField);
+
+    return AssembleTestBSP(MakeConverterTestLumps(entities.c_str()));
+}
+
+//The test BSP whose sky miptex is renamed, so that the map has no sky texture.
+static std::vector<std::uint8_t> MakeBSPWithoutSkyTexture()
+{
+    static const std::uint8_t s_SkyName[] = {'s', 'k', 'y', 0};
+    constexpr std::uint8_t    s_Renamed   = 'z';
+
+    auto       file  = MakeConverterTestBSP();
+    const auto first = std::search(file.begin(), file.end(), std::begin(s_SkyName), std::end(s_SkyName));
+    Require(first != file.end() && std::search(first + 1, file.end(), std::begin(s_SkyName), std::end(s_SkyName)) == file.end(), "the test BSP names one sky miptex");
+    first[1] = s_Renamed;
+
+    return file;
+}
+
+//The sky box of a map with sky faces: the images the engine loads, the Sky_Box node and its cube map, which the render
+//manifest names as its environment light.
+static void TestSkyBox()
+{
+    const auto file = MakeConverterTestBSP();
+    const auto run  = ConvertWithSky(file, {}, "desert");
+    Require(run.result.bSuccess && !HasDiagnostic(run.result, DiagnosticCode::MissingSkyboxTexture), "the test BSP converts with every sky image");
+
+    auto document = ParseGLB(run.result.data);
+    RequireValidDocument(document);
+
+    const auto& sky = document.Goldsrc()["sky"];
+    Require(sky["skyname"] == "desert" && sky["imageSkyname"] == "desert" && sky["faceOrder"] == json(s_SkyFaceSuffixes), "the sky names its images and their order");
+    Require(sky["box"]["halfExtent"].get<double>() == s_SkyHalfExtent && sky["environmentMap"] == "converter_test.sky.dds", "the sky describes its box and cube map");
+
+    const auto node = FindNode(document, "Sky_Box");
+    Require(node == sky["box"]["node"].get<int>() && NodeParents(document)[node] == FindNode(document, "BSP_Root"), "the Sky_Box node is a child of BSP_Root, outside the world");
+    Require(document.gltf["nodes"][node]["mesh"] == sky["box"]["mesh"], "the node shows the box mesh");
+    RequireSkyBoxMesh(document, sky, s_SkyFaceCount);
+
+    const auto* pDDS = FindOutput(run.result, s_TestSkyDDSPath);
+    Require(pDDS, "the cube map is written in the asset directory");
+    RequireCubeMapShowsSky(pDDS->bytes, s_SkyFaceCount);
+
+    const auto ddsOrder  = pDDS - run.result.externalFiles.data();
+    const auto areaOrder = FindOutput(run.result, s_TestAreaLightPath) - run.result.externalFiles.data();
+    Require(ddsOrder < areaOrder, "the cube map is written before the area light descriptor");
+
+    const auto manifest = OutputJSON(run.result, s_TestManifestPath);
+    const json expectedSky{{"name", "Sky"}, {"type", "EnvironmentLight"}, {"path", s_TestSkyDDSPath}, {"radianceScale", json::array({s_DefaultSkyRadianceScale, s_DefaultSkyRadianceScale, s_DefaultSkyRadianceScale})}};
+    Require(manifest["graph"].size() == 2 && manifest["graph"][1] == expectedSky, "the manifest's environment light is the sky's cube map");
+
+    WriteOutput("converter_skybox.glb", run.result.data);
+    WriteOutput("converter_skybox.sky.dds", pDDS->bytes);
+
+    //A face without image is black; the others are kept.
+    const auto missing = ConvertWithSky(file, {}, "desert", s_SkyUpFace);
+    Require(missing.result.bSuccess && HasDiagnostic(missing.result, DiagnosticCode::MissingSkyboxTexture), "a missing face is reported");
+    const auto missingDocument = ParseGLB(missing.result.data);
+    RequireSkyBoxMesh(missingDocument, missingDocument.Goldsrc()["sky"], s_SkyUpFace);
+    RequireCubeMapShowsSky(FindOutput(missing.result, s_TestSkyDDSPath)->bytes, s_SkyUpFace);
+
+    //A sky none of whose images loads falls back to desert, as does a worldspawn without skyname.
+    const auto fallback    = ConvertWithSky(MakeBSPWithWorldspawnSky("\"skyname\" \"nosuch\"\n"), {}, "desert");
+    const auto fallbackSky = ParseGLB(fallback.result.data).Goldsrc()["sky"];
+    Require(fallbackSky["skyname"] == "nosuch" && fallbackSky["imageSkyname"] == "desert" && fallbackSky.contains("box"), "an unloadable sky falls back to desert");
+    Require(std::count(fallback.requested.begin(), fallback.requested.end(), "nosuchrt") == 1 && std::count(fallback.requested.begin(), fallback.requested.end(), "desertrt") == 1, "both skies are requested");
+
+    const auto unnamed = ConvertWithSky(MakeBSPWithWorldspawnSky(""), {}, "desert");
+    Require(ParseGLB(unnamed.result.data).Goldsrc()["sky"]["skyname"] == "desert", "a worldspawn without skyname shows desert");
+
+    //Without the option, the images are kept but neither box nor cube map is exported.
+    BSPConversionOptions noBox;
+    noBox.bExportSkyBox = false;
+
+    const auto noBoxRun      = ConvertWithSky(file, noBox, "desert");
+    const auto noBoxDocument = ParseGLB(noBoxRun.result.data);
+    Require(FindNode(noBoxDocument, "Sky_Box") < 0 && !noBoxDocument.Goldsrc()["sky"].contains("box") && noBoxDocument.Goldsrc()["sky"].contains("faceTextures"), "the option leaves the box out");
+    Require(!FindOutput(noBoxRun.result, s_TestSkyDDSPath) && OutputJSON(noBoxRun.result, s_TestManifestPath)["graph"].size() == 1 && noBoxRun.result.cacheKey != run.result.cacheKey, "no cube map or environment light, another cache key");
+
+    BSPConversionOptions brighter;
+    brighter.skyRadianceScale = 2.5f;
+
+    const auto brighterRun = ConvertWithSky(file, brighter, "desert");
+    Require(OutputJSON(brighterRun.result, s_TestManifestPath)["graph"][1]["radianceScale"] == json::array({2.5, 2.5, 2.5}) && brighterRun.result.cacheKey != run.result.cacheKey, "the radiance scale reaches the environment light and the cache key");
+    Require(brighterRun.result.data == run.result.data, "the radiance scale leaves the asset alone");
+
+    brighter.skyRadianceScale = -1;
+    Require(ConvertWithSky(file, brighter, "desert").result.error == ConversionError::InvalidRequest, "a negative sky radiance scale is rejected");
+
+    //A map without sky texture has no sky box, and no sky image is requested.
+    const auto noSkyTexture = ConvertWithSky(MakeBSPWithoutSkyTexture(), {}, "desert");
+    const auto noSkySky     = ParseGLB(noSkyTexture.result.data).Goldsrc()["sky"];
+    Require(noSkySky["skyname"] == "desert" && !noSkySky.contains("faceTextures") && !noSkySky.contains("box"), "a map without sky texture keeps only its skyname");
+    Require(std::count(noSkyTexture.requested.begin(), noSkyTexture.requested.end(), "desertrt") == 0 && !FindOutput(noSkyTexture.result, s_TestSkyDDSPath), "no sky image is requested");
 }
 
 //16.3 / 16.4 / 16.5 Every entity has a node; brush entities share their submodel's meshes.
@@ -1578,12 +1946,12 @@ static Vec3 ExpectedSkyDirection(double pitch, double yaw)
 }
 
 //The default lux per "_light" brightness unit of the environment light.
-constexpr double s_DefaultEnvironmentLightScale = 3;
+constexpr float s_DefaultEnvironmentLightScale = 0.2f;
 
 static void TestEnvironmentLight()
 {
     BSPConversionOptions defaults;
-    Require(defaults.environmentLightIntensityScale == s_DefaultEnvironmentLightScale, "the public environment light multiplier defaults to three");
+    Require(defaults.environmentLightIntensityScale == s_DefaultEnvironmentLightScale, "the public environment light multiplier defaults to 0.2");
 
     ConversionRun baselineRun;
     const auto    baseline = ConvertAndParse(MakeConverterTestBSP(), {}, baselineRun);
@@ -2357,6 +2725,7 @@ int main(int argc, char** argv)
     TestWorldGeometry();
     TestTriangleWinding();
     TestSkyGeometry();
+    TestSkyBox();
     TestEntityNodes();
     TestEntityKeyValues();
     TestPointLightEntities();

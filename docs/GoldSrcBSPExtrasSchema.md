@@ -1,9 +1,13 @@
 # `extras.goldsrc` schema
 
-Version 1 (`BSPConversionSummary::extrasSchemaVersion`). Every object the converter annotates carries its GoldSrc data
+Version 2 (`BSPConversionSummary::extrasSchemaVersion`). Every object the converter annotates carries its GoldSrc data
 in `extras.goldsrc`, with a `schemaVersion` field. Readers must check `schemaVersion` and ignore fields they do not
 know; fields are only added within a version, never removed or reinterpreted. Changing a field's meaning raises the
 version, and with it the cache key (see `BSPConversionSummary::szCacheKey`).
+
+Version 2 changed `sky`: it is also present for a map with a sky texture and no `skyname` key, whose `skyname` is then
+`desert`, and its `faceTextures` are the images of the sky the engine loads, which may be `desert`'s (`imageSkyname`).
+It added the sky box (`box`, `environmentMap`) and the sky box materials (`surfaceType: "skybox"`).
 
 General rules:
 
@@ -19,7 +23,7 @@ General rules:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `1` |
+| `schemaVersion` | integer | `2` |
 | `converterVersion` | integer | `ConverterVersion` of the converter that wrote the file |
 | `assetType` | string | `"BSP"` |
 | `sourceFormat` | string | `"BSP30"` or `"BSP30_BlueShift"` (entity and plane lumps swapped) |
@@ -33,7 +37,7 @@ General rules:
 | `models` | object[] | one entry per BSP model, by model index (see below) |
 | `texInfos` | `[miptex, flags][]` | every texinfo of the file: its miptex slot and its flags (`1` is `TEX_SPECIAL`) |
 | `lightmaps` | object | lightmap atlases (see below) |
-| `sky` | object | present when the worldspawn has a `skyname` key (see below) |
+| `sky` | object | present when the worldspawn has a `skyname` key or the map has a sky texture (see below) |
 | `spatialData` | object | present only when visibility or collision data is embedded (see below) |
 | `sourceHash` | string | SHA-256 (lowercase hex) of the BSP file |
 | `textureHash` | string | SHA-256 of every resolved image, in resolution order |
@@ -78,11 +82,16 @@ are written as 255. The lightmap textures are referenced only from here: standar
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `skyname` | string | the worldspawn `skyname` |
+| `skyname` | string | the worldspawn `skyname`, `"desert"` (`sv_skyname`'s default) without one |
 | `faceOrder` | string[] | `["rt", "bk", "lf", "ft", "up", "dn"]`: the image name suffixes, in the engine's order |
-| `faceTextures` | integer[6] | glTF texture of each face in `faceOrder`, `-1` when unresolved; only when a resolver is given |
+| `imageSkyname` | string | the sky whose images were looked up last: `skyname`, or `"desert"` when no face of `skyname` was resolved; only for a map with a sky texture and a resolver |
+| `faceTextures` | integer[6] | glTF texture of each face of `imageSkyname` in `faceOrder`, `-1` when unresolved (the engine draws it black); only with `imageSkyname` |
+| `box` | object | `{node, mesh, halfExtent}`: the `Sky_Box` node and mesh, and the distance of its faces from the map's origin in GoldSrc units; only when the sky box is exported |
+| `environmentMap` | string | the sky's cube map, relative to the asset's directory; with `box` |
 
-The sky geometry itself is in the models' `sky` meshes.
+The engine loads a sky box only for a map with a texture named `sky*`; without one only `skyname` and `faceOrder` are
+present. The sky geometry itself is in the models' `sky` meshes. The `Sky_Box` mesh has one primitive per face in
+`faceOrder`, without primitive extras.
 
 ### `spatialData`
 
@@ -130,7 +139,7 @@ The worldspawn's node (`BSP_World`) and the node of every brush and point entity
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `1` |
+| `schemaVersion` | integer | `2` |
 | `entityIndex` | integer | the entity's index in the lump: its stable identity (node names are not) |
 | `classname` | string | the `classname` value (last occurrence), `""` when absent |
 | `originalModelString` | string | the `model` value, when present |
@@ -153,7 +162,7 @@ meshes; point entity nodes have no mesh.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `1` |
+| `schemaVersion` | integer | `2` |
 | `bspModelIndex` | integer | the model the primitive belongs to |
 | `geometryKind` | string | `"surface"`, `"sky"` or `"water"` |
 | `faceCount` | integer | number of faces in the primitive |
@@ -177,13 +186,13 @@ Face record columns:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `1` |
+| `schemaVersion` | integer | `2` |
 | `miptexIndex` | integer | the miptex slot of the faces, `-1` without texture lump |
 | `originalTextureName` | string | the miptex name as the engine reads it (with the `~` rule applied) |
 | `storedTextureName` | string | the name as stored in the file, when it differs |
 | `textureSize` | `[width, height]` | the miptex header's size: the texture coordinate scale |
 | `embedded` | boolean | the BSP holds the miptex pixels |
-| `surfaceType` | string | `"regular"`, `"sky"` or `"water"` |
+| `surfaceType` | string | `"regular"`, `"sky"` or `"water"`; `"skybox"` for the `Sky_Box` faces (see below) |
 | `isGoldSrcSky` | boolean | sky material: the runtime draws the sky box there (the material is a placeholder colour) |
 | `placeholder` | boolean | the base colour is a placeholder, not the texture (sky) |
 | `liquidType` | string | water: `"water"`, `"slime"` or `"lava"` by the compilers' name convention (`!lava`, `*slime`, …) |
@@ -196,6 +205,9 @@ Face record columns:
 | `displayedMiptexIndex` | integer | the slot of the frame shown at time 0 when it differs from `miptexIndex` (animations) |
 | `animation` | object | animated textures (see below) |
 | `detail` | object | `{scale: [s, t], assetId, texture}`: the detail texture of the slot, `texture` a glTF texture or `-1` |
+
+The materials of the `Sky_Box` faces carry `schemaVersion`, `surfaceType: "skybox"`, `skyFace` (the face's suffix
+in `sky.faceOrder`) and `missingTexture` (the face has no image and is black); none of the fields above apply.
 
 `animation`:
 
@@ -211,6 +223,6 @@ Face record columns:
 - Locate entities by `extras.goldsrc.entityIndex`, not by node name or order.
 - Place nodes in GoldSrc space by ignoring `BSP_Root`'s rotation and scale, or work in glTF space with them.
 - Render lightmaps from `asset.extras.goldsrc.lightmaps.layers` and `TEXCOORD_1`, weighting by the face records'
-  styles; render the sky box from `sky` where `isGoldSrcSky` materials are; animate water and textures from the
-  material extras.
+  styles; render the sky box from `sky` (its cube map, or its images) where `isGoldSrcSky` materials are, leaving the
+  `Sky_Box` node out; animate water and textures from the material extras.
 - Use `spatialData` only when present; otherwise read PVS and collision from the original BSP.

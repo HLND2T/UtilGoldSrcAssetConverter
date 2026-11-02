@@ -190,11 +190,34 @@ void ExtractBSPSkyFace(const CBSPFileReader& reader, std::uint32_t face, BSPPrim
 bool DecodeMiptex(const std::uint8_t* pRecord, std::size_t recordBytes, std::vector<std::uint8_t>& texels, std::uint32_t& width, std::uint32_t& height, std::string& error);
 
 //Resolves, encodes and shares the images of a conversion (BSPTextureConverter.cpp).
+//Suffixes of the sky box faces, in GoldSrcRender::SkyFace order, as the engine names their images (R_LoadSkys).
+inline constexpr const char* SkyboxFaceSuffixes[GoldSrcRender::SkyFaceCount] = {"rt", "bk", "lf", "ft", "up", "dn"};
+
 struct BSPDecodedImage
 {
     std::vector<std::uint8_t> texels;
     std::uint32_t             width{};
     std::uint32_t             height{};
+};
+
+//The images of the sky box faces of skyName, in the order rt, bk, lf, ft, up, dn: their glTF textures, -1 for a face
+//without image, and the decoded RGBA8 texels of the faces that have one (empty otherwise).
+struct BSPSkyboxImages
+{
+    std::string                                              skyName;
+    std::array<int, GoldSrcRender::SkyFaceCount>             textures{};
+    std::array<BSPDecodedImage, GoldSrcRender::SkyFaceCount> images;
+
+    bool HasImage() const
+    {
+        for (const auto texture : textures)
+        {
+            if (texture >= 0)
+                return true;
+        }
+
+        return false;
+    }
 };
 
 class CBSPTextureConverter
@@ -208,8 +231,9 @@ public:
     //glTF texture of a detail binding, -1 when the resolver has none.
     int GetDetailTexture(std::uint32_t detailBinding);
 
-    //glTF textures of the six skybox faces of skyname, in the order rt, bk, lf, ft, up, dn; -1 for missing faces.
-    std::array<int, GoldSrcRender::SkyFaceCount> GetSkyboxTextures(const std::string& skyName);
+    //Images of the six skybox faces of skyname, resolved as SkyboxFace requests (a warning for each missing face). The
+    //textures clamp to the edges of their image.
+    BSPSkyboxImages GetSkyboxImages(const std::string& skyName);
 
     bool HasAlpha(std::uint32_t slot) const;
 
@@ -235,7 +259,9 @@ public:
     std::string FinishHash();
 
 private:
-    int  AddImage(const std::string& name, const std::vector<std::uint8_t>& texels, std::uint32_t width, std::uint32_t height, bool bAlpha);
+    int  AddImage(const std::string& name, const std::vector<std::uint8_t>& texels, std::uint32_t width, std::uint32_t height, bool bAlpha, int sampler);
+    int  GetRepeatSampler();
+    int  GetClampSampler();
     bool Resolve(const TextureRequest& request, const BSPRawMiptex* pEmbedded, std::vector<std::uint8_t>& texels, std::uint32_t& width, std::uint32_t& height, std::string& error);
 
     const BSPConversionSource&     m_Source;
@@ -249,6 +275,7 @@ private:
     std::uint32_t                  m_MissingCount{};
     CSHA256                        m_Hash;
     int                            m_Sampler{-1};
+    int                            m_ClampSampler{-1};
 };
 
 //extras.goldsrc of the conversion's objects (BSPMetadataWriter.cpp). Strings that are not UTF-8 are stored as
@@ -272,6 +299,23 @@ nlohmann::json AppendBSPSpatialData(const BSPConversionSource& source, CGLTFDocu
 ConversionError BuildBSPAreaLights(const BSPConversionSource& source, const std::vector<BSPModelGeometry>& models, const CBSPTextureConverter& textures, const tinygltf::Model& gltf, nlohmann::json& output, std::string& error);
 
 nlohmann::json FitBSPAreaLightPrimitive(const BSPPrimitive& primitive, const tinygltf::Material& material, const BSPDecodedImage& image, std::uint32_t budget, nlohmann::json& statistics, std::uint32_t modelIndex);
+
+//The sky of a converted map (BSPSkyBoxConverter.cpp): extras.goldsrc.sky, null when the map has neither sky faces nor
+//a worldspawn skyname, and the cube map file, empty when the sky box is not exported.
+struct BSPSkyBox
+{
+    nlohmann::json            extras;
+    std::vector<std::uint8_t> environmentMap;
+};
+
+//Resolves the sky box images of a map with sky faces as the engine loads them and, when BSPConversionOptions::
+//bExportSkyBox and a face has an image, adds the Sky_Box node under the scene's root and makes the cube map, which
+//extras.goldsrc.sky names as environmentMapName (relative to the asset).
+BSPSkyBox AddSkyBox(const BSPConversionSource& source, std::uint32_t worldspawn, const std::string& environmentMapName, CBSPTextureConverter& textures, CGLTFDocumentBuilder& document, ConversionStatistics& statistics);
+
+//The DDS cube map (RGBA8 sRGB, one mip) of the sky box faces, oriented for the converted scene's axes (see
+//AddSkyBox); faces without image are black. Every face of the cube is as large as the largest image.
+std::vector<std::uint8_t> MakeSkyEnvironmentMap(const BSPSkyboxImages& images);
 } // namespace GoldSrcAssetConverter
 
 #endif

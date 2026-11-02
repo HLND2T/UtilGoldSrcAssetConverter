@@ -2,12 +2,16 @@
 //without a render device: the documents must be readable by GLTF::Model as DiligentFX's GLTF_PBR_Renderer and the
 //RTXPT scene graph consume them. The converter tests write the files first (CTest fixture).
 #include "DiligentTools/AssetLoader/interface/GLTFLoader.hpp"
+#include "DiligentTools/TextureLoader/interface/TextureLoader.h"
 
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
+#include <vector>
 
 using namespace Diligent;
 
@@ -134,8 +138,8 @@ static void TestDirectionalLight(const std::filesystem::path& path)
     GLTF::Model model{nullptr, nullptr, createInfo};
     const auto* pNode = FindNode(model, "ent_0010_light_environment_DirectionalLight");
     Require(model.Lights.size() == 1 && pNode && pNode->pLight == &model.Lights[0] && pNode->pLight->Type == GLTF::Light::TYPE::DIRECTIONAL, "the light_environment child loads its directional light");
-    //"_light" 100 times the default multiplier 3.
-    constexpr float s_SunIlluminance = 300;
+    //"_light" 100 times the default multiplier 0.2.
+    constexpr float s_SunIlluminance = 20;
     Require(std::fabs(s_SunIlluminance - pNode->pLight->Intensity) < s_Tolerance, "the loader preserves the directional light illuminance");
 
     //Pitch -60, yaw 0: GoldSrc (cos 60, 0, -sin 60) is glTF (cos 60, -sin 60, 0); lights shine along their -z row.
@@ -185,6 +189,66 @@ static void TestTextureLight(const std::filesystem::path& path)
     Require(bFound, "the loader finds a texture light");
 }
 
+//The Sky_Box node beside the world: a child of BSP_Root showing a mesh of six unlit faces.
+static void TestSkyBox(const std::filesystem::path& path)
+{
+    constexpr size_t s_SkyFaceCount = 6;
+
+    const auto fileName = path.string();
+
+    GLTF::ModelCreateInfo createInfo;
+    createInfo.FileName = fileName.c_str();
+
+    GLTF::Model model{nullptr, nullptr, createInfo};
+
+    const auto* pSkyBox = FindNode(model, "Sky_Box");
+    Require(pSkyBox && pSkyBox->Parent && pSkyBox->Parent->Name == "BSP_Root" && pSkyBox->pMesh && pSkyBox->pMesh->Primitives.size() == s_SkyFaceCount, "the loader finds the sky box beside the world");
+
+    for (const auto& primitive : pSkyBox->pMesh->Primitives)
+        Require(model.Materials[primitive.MaterialId].Attribs.Workflow == GLTF::Material::PBR_WORKFLOW_UNLIT, "the sky box faces are unlit");
+}
+
+//The sky's cube map, read by DiligentTools' DDS loader as the renderers read it: an sRGB RGBA8 cube with one mip level
+//whose faces, +x -x +y -y +z -z in the scene's axes (y up, BSP_Root's rotation), show the sky box faces rt lf up dn ft
+//bk. The test images' blue channel names their face: (face + 1) * 40, face in rt bk lf ft up dn order.
+static void TestSkyEnvironmentMap(const std::filesystem::path& path)
+{
+    constexpr Uint32 s_SkyImageSize                     = 4;
+    constexpr Uint32 s_CubeFaceCount                    = 6;
+    constexpr Uint32 s_SkyFaceStep                      = 40;
+    constexpr Uint32 s_RGBABytes                        = 4;
+    constexpr Uint32 s_BlueChannel                      = 2;
+    constexpr Uint32 s_CubeFaceSkyFace[s_CubeFaceCount] = {0, 2, 4, 5, 3, 1};
+
+    std::ifstream file(path, std::ios::binary);
+    Require(file.good(), "the sky cube map is written");
+    const std::vector<char> bytes{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+
+    TextureLoadInfo loadInfo;
+    loadInfo.GenerateMips = false;
+
+    RefCntAutoPtr<ITextureLoader> pLoader;
+    CreateTextureLoaderFromMemory(bytes.data(), bytes.size(), false, loadInfo, &pLoader);
+    Require(pLoader, "the DDS loader reads the sky cube map");
+
+    const auto& desc = pLoader->GetTextureDesc();
+    Require(desc.Type == RESOURCE_DIM_TEX_CUBE && desc.Width == s_SkyImageSize && desc.Height == s_SkyImageSize && desc.ArraySize == s_CubeFaceCount && desc.MipLevels == 1 && desc.Format == TEX_FORMAT_RGBA8_UNORM_SRGB,
+            "the sky cube map is an sRGB RGBA8 cube without mips");
+
+    for (Uint32 face = 0; face < s_CubeFaceCount; ++face)
+    {
+        const auto& subresource = pLoader->GetSubresourceData(0, face);
+        const auto* pTexels     = static_cast<const Uint8*>(subresource.pData);
+        Require(pTexels && subresource.Stride >= s_SkyImageSize * s_RGBABytes, "each cube face has its texels");
+
+        for (Uint32 y = 0; y < s_SkyImageSize; ++y)
+        {
+            for (Uint32 x = 0; x < s_SkyImageSize; ++x)
+                Require(pTexels[y * subresource.Stride + x * s_RGBABytes + s_BlueChannel] == (s_CubeFaceSkyFace[face] + 1) * s_SkyFaceStep, "each cube face shows its sky box face");
+        }
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (argc < 2)
@@ -202,6 +266,8 @@ int main(int argc, char** argv)
     TestTextureLight(directory / "converter_emissive.glb");
     TestColoredPointLight(directory / "converter_point_lights.glb");
     TestDirectionalLight(directory / "converter_environment_light.glb");
+    TestSkyBox(directory / "converter_skybox.glb");
+    TestSkyEnvironmentMap(directory / "converter_skybox.sky.dds");
 
     std::cout << "DiligentTools GLTF loader tests passed\n";
 

@@ -38,9 +38,6 @@ constexpr std::size_t  s_WADLumpNameOffset  = 16;
 constexpr std::size_t  s_WADLumpNameBytes   = 16;
 constexpr std::uint8_t s_WADTypeMiptex      = 0x43;
 
-//Suffixes of the skybox faces, in GoldSrc's R_LoadSkys order.
-static const char* const s_SkyboxSuffixes[GoldSrcRender::SkyFaceCount] = {"rt", "bk", "lf", "ft", "up", "dn"};
-
 static std::uint32_t ReadUInt32(const std::uint8_t* pBytes, std::size_t offset)
 {
     return GoldSrcRender::ReadUInt32(pBytes, offset);
@@ -225,7 +222,24 @@ bool CBSPTextureConverter::Resolve(const TextureRequest& request, const BSPRawMi
     return false;
 }
 
-int CBSPTextureConverter::AddImage(const std::string& name, const std::vector<std::uint8_t>& texels, std::uint32_t width, std::uint32_t height, bool bAlpha)
+int CBSPTextureConverter::GetRepeatSampler()
+{
+    if (m_Sampler < 0)
+        m_Sampler = m_Document.AddSampler(TINYGLTF_TEXTURE_FILTER_LINEAR, TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR, TINYGLTF_TEXTURE_WRAP_REPEAT, TINYGLTF_TEXTURE_WRAP_REPEAT);
+
+    return m_Sampler;
+}
+
+//The engine samples the sky box faces bilinearly, clamped to their edges (R_DrawSkyBox).
+int CBSPTextureConverter::GetClampSampler()
+{
+    if (m_ClampSampler < 0)
+        m_ClampSampler = m_Document.AddSampler(TINYGLTF_TEXTURE_FILTER_LINEAR, TINYGLTF_TEXTURE_FILTER_LINEAR, TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE, TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE);
+
+    return m_ClampSampler;
+}
+
+int CBSPTextureConverter::AddImage(const std::string& name, const std::vector<std::uint8_t>& texels, std::uint32_t width, std::uint32_t height, bool bAlpha, int sampler)
 {
     m_Hash.Update(name.data(), name.size());
     m_Hash.Update(&width, sizeof(width));
@@ -252,14 +266,11 @@ int CBSPTextureConverter::AddImage(const std::string& name, const std::vector<st
     if (!bEncoded)
         throw std::runtime_error("PNG encoding of texture \"" + name + "\" failed");
 
-    if (m_Sampler < 0)
-        m_Sampler = m_Document.AddSampler(TINYGLTF_TEXTURE_FILTER_LINEAR, TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR, TINYGLTF_TEXTURE_WRAP_REPEAT, TINYGLTF_TEXTURE_WRAP_REPEAT);
-
     const auto image = m_Document.AddPNGImage(name, std::move(png));
 
     ++m_TextureCount;
 
-    return m_Document.AddTexture(image, m_Sampler, name);
+    return m_Document.AddTexture(image, sampler, name);
 }
 
 int CBSPTextureConverter::GetMiptexTexture(std::uint32_t slot)
@@ -315,7 +326,7 @@ int CBSPTextureConverter::GetMiptexTexture(std::uint32_t slot)
 
     //The engine alpha tests only '{' textures (TEX_TYPE_ALPHA); their transparent texels are kept.
     const bool bAlpha  = miptex.name[0] == s_MaskedTexturePrefix;
-    const auto texture = AddImage(name, texels, width, height, bAlpha);
+    const auto texture = AddImage(name, texels, width, height, bAlpha, GetRepeatSampler());
 
     m_MiptexTextures.emplace(slot, texture);
     m_MiptexAlpha.emplace(slot, bAlpha);
@@ -380,43 +391,43 @@ int CBSPTextureConverter::GetDetailTexture(std::uint32_t detailBinding)
         return -1;
     }
 
-    const auto texture = AddImage(name, texels, width, height, false);
+    const auto texture = AddImage(name, texels, width, height, false, GetRepeatSampler());
     m_DetailTextures.emplace(detailBinding, texture);
 
     return texture;
 }
 
-std::array<int, GoldSrcRender::SkyFaceCount> CBSPTextureConverter::GetSkyboxTextures(const std::string& skyName)
+BSPSkyboxImages CBSPTextureConverter::GetSkyboxImages(const std::string& skyName)
 {
-    std::array<int, GoldSrcRender::SkyFaceCount> textures;
+    BSPSkyboxImages sky;
+    sky.skyName = skyName;
 
     for (std::uint32_t i = 0; i < GoldSrcRender::SkyFaceCount; ++i)
     {
-        const auto name = skyName + s_SkyboxSuffixes[i];
+        const auto name = skyName + SkyboxFaceSuffixes[i];
 
         TextureRequest request;
         request.kind   = TextureKind::SkyboxFace;
         request.szName = name.c_str();
 
-        std::vector<std::uint8_t> texels;
-        std::uint32_t             width{};
-        std::uint32_t             height{};
-        std::string               error;
+        auto&       image = sky.images[i];
+        std::string error;
 
         bool       bLatin1{};
         const auto displayName = MakeJSONString(name, bLatin1);
 
-        if (!Resolve(request, nullptr, texels, width, height, error))
+        if (!Resolve(request, nullptr, image.texels, image.width, image.height, error))
         {
-            m_Diagnostics.Report(DiagnosticSeverity::Warning, DiagnosticCode::MissingSkyboxTexture, "skybox face \"" + displayName + "\": " + error + "; the sky geometry is kept");
-            textures[i] = -1;
+            m_Diagnostics.Report(DiagnosticSeverity::Warning, DiagnosticCode::MissingSkyboxTexture, "skybox face \"" + displayName + "\": " + error + "; the face is black");
+            image           = {};
+            sky.textures[i] = -1;
             continue;
         }
 
-        textures[i] = AddImage(displayName, texels, width, height, false);
+        sky.textures[i] = AddImage(displayName, image.texels, image.width, image.height, false, GetClampSampler());
     }
 
-    return textures;
+    return sky;
 }
 
 std::string CBSPTextureConverter::FinishHash()

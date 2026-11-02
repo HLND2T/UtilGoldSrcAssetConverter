@@ -71,13 +71,24 @@ struct BSPConversionOptions
     //Multiplier for the constant directional light generated as a child of the first preserved "light_environment"
     //entity, in lux per unit of its "_light" brightness. Finite and nonnegative; 0 disables conversion and leaves the
     //entity nodes intact. Directional illuminance does not depend on scaleFactor. The final intensity must fit in a
-    //float. The default 3 matches the shaded outdoor brightness of the GoldSrc lightmaps of cs_assault.
-    float environmentLightIntensityScale{3.0f};
+    //float. The default 0.2 matches the ratio of shaded to sky brightness in the GoldSrc lightmaps of de_dust2 when
+    //the sky lights the scene at the default skyRadianceScale.
+    float environmentLightIntensityScale{0.2f};
 
     //Write <resource>/<resource>.sh9/area-lights.json, including an empty list when disabled to replace stale
     //descriptors.
     bool          bExportAreaLights{true};
     std::uint32_t maxAreaLightsPerGroup{16}; //Valid range: 1-64.
+
+    //Export the sky box the engine draws for a map with sky faces, when the resolver provides an image of its faces:
+    //the Sky_Box node with a textured cube around the map, and the cube map <resource>/<resource>.sky.dds that the
+    //render manifest names as its environment light.
+    bool bExportSkyBox{true};
+
+    //Radiance of a white sky texel in the manifest's environment light; finite and nonnegative. Path tracers light the
+    //scene with it; it does not change the sky box's images. The default 2 matches the sky's brightness on screen in
+    //GoldSrc, whose display gamma brightens it.
+    float skyRadianceScale{2.0f};
 };
 
 enum class ConversionError : std::uint32_t
@@ -131,8 +142,9 @@ struct DiagnosticView
 
 //The images a conversion asks the caller for. Miptex: the texture of a miptex slot of the BSP's texture lump, as the
 //engine loads it from the BSP or a WAD. Detail: the detail texture of a slot (see GoldSrcRender::DetailTextureBinding).
-//SkyboxFace: one face of the worldspawn skyname environment, named "<skyname><suffix>" with the suffixes rt, bk, lf,
-//ft, up, dn.
+//SkyboxFace: one face of the sky box, named "<skyname><suffix>" with the suffixes rt, bk, lf, ft, up, dn, for a map with
+//sky faces; skyname is the worldspawn's, "desert" without one, and "desert" again when no face of the first resolves,
+//as the engine loads gfx/env/<skyname><suffix> images.
 enum class TextureKind : std::uint32_t
 {
     Miptex,
@@ -187,7 +199,8 @@ public:
 };
 
 //Receives the converted files, on the converting thread, with paths relative to the sink's root: the asset itself first,
-//<resource>/<resource>.glb or .gltf, then its external images under <resource>/textures/, the area light descriptor
+//<resource>/<resource>.glb or .gltf, then its external images under <resource>/textures/, the sky's cube map
+//<resource>/<resource>.sky.dds when the sky box is exported, the area light descriptor
 //<resource>/<resource>.sh9/area-lights.json, and last the render manifest <resource>.manifest.json, which names the
 //others relative to the root. szRelativePath and pData are borrowed for the call. Assets written to one root need
 //distinct resource names.
@@ -294,6 +307,6 @@ public:
     virtual bool FindWAD3Texture(const std::uint8_t* pWad, std::uint64_t wadBytes, const char* szName, GoldSrcAssetConverter::ResolvedTexture* pTexture) noexcept = 0;
 };
 
-#    define UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION "UtilGoldSrcAssetConverterAPI_005"
+#    define UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION "UtilGoldSrcAssetConverterAPI_006"
 
 #endif

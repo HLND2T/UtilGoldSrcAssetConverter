@@ -101,6 +101,7 @@ int main(int argc, char** argv)
     Require(!factory("UtilGoldSrcAssetConverterAPI_002", nullptr), "the request layout without pointLightIntensityScale is refused");
     Require(!factory("UtilGoldSrcAssetConverterAPI_003", nullptr), "the request layout without area light options is refused");
     Require(!factory("UtilGoldSrcAssetConverterAPI_004", nullptr), "the request layout without environmentLightIntensityScale is refused");
+    Require(!factory("UtilGoldSrcAssetConverterAPI_005", nullptr), "the request layout without sky box options is refused");
 
     auto* pConverter = static_cast<IUtilGoldSrcAssetConverter*>(factory(UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION, nullptr));
     Require(pConverter, "the converter interface is published");
@@ -162,6 +163,18 @@ int main(int argc, char** argv)
     const auto disabledEnvironment                 = pConverter->ConvertBSP(request);
     Require(disabledEnvironment.error == ConversionError::None && std::strcmp(summary.szCacheKey, disabledEnvironment.szCacheKey) != 0, "the DLL accepts the environment light scale option, which changes the cache key");
     request.options.environmentLightIntensityScale = BSPConversionOptions{}.environmentLightIntensityScale;
+
+    //The sky box options reach the DLL: each changes the cache key.
+    for (auto setOption : {+[](BSPConversionOptions& options) { options.bExportSkyBox = false; }, +[](BSPConversionOptions& options) { options.skyRadianceScale = 0; }})
+    {
+        CCollectingOutputSink skySink(true);
+        request.pOutputSink = &skySink;
+        setOption(request.options);
+
+        const auto sky = pConverter->ConvertBSP(request);
+        Require(sky.error == ConversionError::None && std::strcmp(summary.szCacheKey, sky.szCacheKey) != 0, "the DLL accepts the sky box options, which change the cache key");
+        request.options = BSPConversionOptions{};
+    }
 
     //Requests without output sink fail with a message.
     request.pOutputSink = nullptr;
