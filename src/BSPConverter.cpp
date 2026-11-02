@@ -30,11 +30,22 @@ constexpr double s_AlphaCutoff = 0.5;
 //RAD's RGB and intensity normalization before the caller's emissive multiplier.
 constexpr double s_RADNormalization = 255;
 
-//GoldSrc's default point light brightness and RGB normalization, used as a relighting starting point.
-constexpr double      s_DefaultPointLightBrightness = 300;
-constexpr double      s_PointLightRGBNormalization  = 255;
-constexpr std::size_t s_PointLightColorComponents   = 3;
-constexpr std::size_t s_PointLightMaxComponents     = s_PointLightColorComponents + 1;
+//GoldSrc's default "_light" brightness and RGB normalization of light entities, used as a relighting starting point.
+constexpr double      s_DefaultLightBrightness = 300;
+constexpr double      s_LightRGBNormalization  = 255;
+constexpr std::size_t s_LightColorComponents   = 3;
+constexpr std::size_t s_LightMaxComponents     = s_LightColorComponents + 1;
+
+//glTF directional lights shine along their local -z; this rotation about y turns -z into +x, the forward axis that
+//GoldSrc angles rotate.
+constexpr double s_LightAxisToForwardRotationY = -90.0;
+
+//Largest component difference of two light_environment directions still taken as the same direction.
+constexpr double s_EnvironmentLightDirectionTolerance = 1e-6;
+constexpr double s_DegreesToRadians                   = 3.14159265358979323846 / 180.0;
+
+//x, y, z, w of a glTF node rotation.
+constexpr std::size_t s_QuaternionComponents = 4;
 
 //Normals shorter than this are rebuilt (see NormalizePrimitiveNormals).
 constexpr float s_MinNormalLength = 1e-6f;
@@ -266,6 +277,12 @@ static bool ValidateOptions(const BSPConversionOptions& options, std::string& er
     if (!std::isfinite(options.pointLightIntensityScale) || options.pointLightIntensityScale < 0)
     {
         error = "the point light intensity scale must be finite and nonnegative";
+        return false;
+    }
+
+    if (!std::isfinite(options.environmentLightIntensityScale) || options.environmentLightIntensityScale < 0)
+    {
+        error = "the environment light intensity scale must be finite and nonnegative";
         return false;
     }
 
@@ -852,20 +869,21 @@ static BSPSceneNodes AddSceneNodes(const BSPConversionSource& source, const std:
     return nodes;
 }
 
-//Read exactly one, three or four whitespace-separated finite nonnegative numbers. GoldSrc light RGB is linear;
+//Read the "_light" key of a light entity: exactly one, three or four whitespace-separated finite nonnegative numbers,
+//the default brightness when missing. GoldSrc light RGB is linear;
 //keep its unscaled peak separate from color so HDR channels can be represented by glTF's bounded color multiplier.
-static bool ParsePointLight(const BSPEntity& entity, tinygltf::Light& light)
+static bool ParseLightValue(const BSPEntity& entity, tinygltf::Light& light)
 {
     light.color        = {1, 1, 1};
-    light.intensity    = s_DefaultPointLightBrightness;
+    light.intensity    = s_DefaultLightBrightness;
     const auto* pValue = entity.FindValue("_light");
 
     if (!pValue)
         return true;
 
-    std::array<double, s_PointLightMaxComponents> values{};
-    std::size_t                                   count{};
-    const char*                                   pText = pValue->c_str();
+    std::array<double, s_LightMaxComponents> values{};
+    std::size_t                              count{};
+    const char*                              pText = pValue->c_str();
 
     for (;;)
     {
@@ -894,24 +912,24 @@ static bool ParsePointLight(const BSPEntity& entity, tinygltf::Light& light)
         return true;
     }
 
-    if (count != s_PointLightColorComponents && count != s_PointLightMaxComponents)
+    if (count != s_LightColorComponents && count != s_LightMaxComponents)
         return false;
 
-    const auto peak = *std::max_element(values.begin(), values.begin() + s_PointLightColorComponents);
+    const auto peak = *std::max_element(values.begin(), values.begin() + s_LightColorComponents);
 
     if (peak > 0)
     {
-        for (std::size_t channel = 0; channel < s_PointLightColorComponents; ++channel)
+        for (std::size_t channel = 0; channel < s_LightColorComponents; ++channel)
             light.color[channel] = values[channel] / peak;
     }
 
     light.intensity = peak;
 
-    if (count == s_PointLightMaxComponents)
-        light.intensity *= values[s_PointLightColorComponents] / s_PointLightRGBNormalization;
+    if (count == s_LightMaxComponents)
+        light.intensity *= values[s_LightColorComponents] / s_LightRGBNormalization;
 
     if (light.intensity == 0)
-        light.color.assign(s_PointLightColorComponents, 1);
+        light.color.assign(s_LightColorComponents, 1);
 
     return true;
 }
@@ -947,7 +965,7 @@ static bool AddPointLights(const BSPConversionSource& source, const BSPSceneNode
 
         tinygltf::Light light;
 
-        if (!ParsePointLight(source.entities[entity], light))
+        if (!ParseLightValue(source.entities[entity], light))
         {
             diagnostics.Report(DiagnosticSeverity::Warning, DiagnosticCode::InvalidEntityValue, "entity " + std::to_string(entity) + ": key \"_light\" must contain 1, 3 or 4 finite nonnegative numbers; point light skipped");
             continue;
@@ -974,6 +992,123 @@ static bool AddPointLights(const BSPConversionSource& source, const BSPSceneNode
     return true;
 }
 
+//The direction a light_environment shines in, in GoldSrc coordinates, as HLSDK's CEnvLight::Spawn computes the sky
+//vector from the light angles: UTIL_MakeAimVectors negates their pitch before AngleVectors, so a negative pitch points
+//down.
+static std::array<double, 3> GetEnvironmentLightDirection(const GoldSrcRender::Vector3& lightAngles)
+{
+    const double pitch = lightAngles.x * s_DegreesToRadians;
+    const double yaw   = lightAngles.y * s_DegreesToRadians;
+
+    return {std::cos(pitch) * std::cos(yaw), std::cos(pitch) * std::sin(yaw), std::sin(pitch)};
+}
+
+//Rotation of the light child of an entity node: the aim rotation turns +x into the direction above, so it is applied
+//after the rotation that turns glTF's light axis -z into +x; the entity node's rotation is cancelled first.
+static Quaternion MakeEnvironmentLightRotation(const tinygltf::Node& entityNode, const GoldSrcRender::Vector3& lightAngles)
+{
+    Quaternion entityRotation;
+
+    if (entityNode.rotation.size() == s_QuaternionComponents)
+        entityRotation = {entityNode.rotation[0], entityNode.rotation[1], entityNode.rotation[2], entityNode.rotation[3]};
+
+    const auto lightAxisToForward = MakeAxisRotation(s_LightAxisToForwardRotationY, 0, 1, 0);
+    const auto aim                = MakeGoldSrcAnglesRotation({-lightAngles.x, lightAngles.y, 0});
+
+    return MultiplyQuaternions(InvertRotation(entityRotation), MultiplyQuaternions(aim, lightAxisToForward));
+}
+
+/*
+====================
+AddEnvironmentLight
+
+The first preserved light_environment entity, in lump order, gains a child with a constant directional light: the sun
+HLRAD bakes into the surfaces that see the sky. Maps often repeat the entity with the same values, so later entities
+add no light; a warning names those whose direction, color or brightness differ. The color and brightness come from
+"_light" as for point lights, and the intensity is illuminance, which the root scale does not change. A malformed
+entity is warned and kept, and the next one is tried; an overflowing final intensity fails before any output is sent.
+====================
+*/
+static bool AddEnvironmentLight(const BSPConversionSource& source, const BSPSceneNodes& nodes, CGLTFDocumentBuilder& document, CConversionDiagnostics& diagnostics, std::string& error)
+{
+    const auto& options = source.pRequest->options;
+
+    if (options.environmentLightIntensityScale == 0)
+        return true;
+
+    auto& gltf = document.GetModel();
+
+    //The values of the converted entity, before scaling.
+    std::size_t           convertedEntity = source.entities.size();
+    std::vector<double>   convertedColor;
+    double                convertedBrightness{};
+    std::array<double, 3> convertedDirection{};
+
+    for (std::size_t entity = 0; entity < source.entities.size(); ++entity)
+    {
+        const auto  index = nodes.entityNodes[entity];
+        const auto& info  = source.entityInfos[entity];
+
+        if (index < 0 || info.classname != "light_environment" || info.modelKind == BSPEntityModelKind::Inline)
+            continue;
+
+        tinygltf::Light light;
+
+        if (!ParseLightValue(source.entities[entity], light))
+        {
+            diagnostics.Report(DiagnosticSeverity::Warning, DiagnosticCode::InvalidEntityValue, "entity " + std::to_string(entity) + ": key \"_light\" must contain 1, 3 or 4 finite nonnegative numbers; directional light skipped");
+            continue;
+        }
+
+        const auto direction = GetEnvironmentLightDirection(info.lightAngles);
+
+        if (convertedEntity < source.entities.size())
+        {
+            bool bSameDirection = true;
+
+            for (std::size_t axis = 0; axis < direction.size(); ++axis)
+                bSameDirection = bSameDirection && std::fabs(direction[axis] - convertedDirection[axis]) <= s_EnvironmentLightDirectionTolerance;
+
+            const bool bSameLight = light.color == convertedColor && light.intensity == convertedBrightness;
+
+            if (!bSameDirection || !bSameLight)
+                diagnostics.Report(DiagnosticSeverity::Warning, DiagnosticCode::DuplicateEnvironmentLight, "entity " + std::to_string(entity) + ": light_environment with another direction, color or brightness; only entity " + std::to_string(convertedEntity) + " is converted");
+
+            continue;
+        }
+
+        convertedEntity     = entity;
+        convertedColor      = light.color;
+        convertedBrightness = light.intensity;
+        convertedDirection  = direction;
+
+        light.intensity *= options.environmentLightIntensityScale;
+
+        if (!std::isfinite(light.intensity) || light.intensity > std::numeric_limits<float>::max())
+        {
+            error = "entity " + std::to_string(entity) + ": the scaled environment light intensity is too large for a float";
+            return false;
+        }
+
+        const auto rotation = MakeEnvironmentLightRotation(gltf.nodes[index], info.lightAngles);
+
+        light.name = gltf.nodes[index].name + "_DirectionalLight";
+        light.type = "directional";
+        tinygltf::Node child;
+        child.name = light.name;
+
+        if (!IsIdentityRotation(rotation))
+            child.rotation = {rotation.x, rotation.y, rotation.z, rotation.w};
+
+        child.light = static_cast<int>(gltf.lights.size());
+        gltf.lights.push_back(std::move(light));
+        const auto childIndex = AddNode(gltf, std::move(child));
+        gltf.nodes[index].children.push_back(childIndex);
+    }
+
+    return true;
+}
+
 static nlohmann::json MakeVectorJSON(const Vector3& vector)
 {
     return nlohmann::json::array({vector.x, vector.y, vector.z});
@@ -987,6 +1122,8 @@ static std::string MakeOptionsKey(const BSPConversionOptions& options)
     std::memcpy(&emissiveBits, &options.emissiveScale, sizeof(emissiveBits));
     std::uint32_t pointLightBits{};
     std::memcpy(&pointLightBits, &options.pointLightIntensityScale, sizeof(pointLightBits));
+    std::uint32_t environmentLightBits{};
+    std::memcpy(&environmentLightBits, &options.environmentLightIntensityScale, sizeof(environmentLightBits));
 
     const bool flags[] = {options.bPreserveSkyGeometry, options.bPreserveBrushEntities, options.bPreservePointEntities, options.bPreserveLightmaps, options.bPreserveLightstyles,
                           options.bPreserveSurfaceMetadata, options.bPreserveEntityKeyValues, options.bEmbedTextures, options.bEmbedBSPVisibilityData, options.bEmbedBSPCollisionData};
@@ -1002,8 +1139,10 @@ static std::string MakeOptionsKey(const BSPConversionOptions& options)
     std::snprintf(szEmissive, sizeof(szEmissive), "%08x", emissiveBits);
     char szPointLight[sizeof(pointLightBits) * 2 + 1]{};
     std::snprintf(szPointLight, sizeof(szPointLight), "%08x", pointLightBits);
+    char szEnvironmentLight[sizeof(environmentLightBits) * 2 + 1]{};
+    std::snprintf(szEnvironmentLight, sizeof(szEnvironmentLight), "%08x", environmentLightBits);
 
-    return key + ";scale=" + szScale + ";emissive=" + szEmissive + ";pointLight=" + szPointLight +
+    return key + ";scale=" + szScale + ";emissive=" + szEmissive + ";pointLight=" + szPointLight + ";environmentLight=" + szEnvironmentLight +
         ";areaLights=" + (options.bExportAreaLights ? "1" : "0") + ";areaBudget=" + std::to_string(options.maxAreaLightsPerGroup);
 }
 
@@ -1177,6 +1316,9 @@ static void ConvertBSPInternal(const BSPConversionRequestView& request, CConvers
     const auto nodes = AddSceneNodes(source, models, worldspawn, document, diagnostics);
 
     if (!AddPointLights(source, nodes, document, diagnostics, error))
+        return Fail(result, ConversionError::InvalidRequest, error);
+
+    if (!AddEnvironmentLight(source, nodes, document, diagnostics, error))
         return Fail(result, ConversionError::InvalidRequest, error);
 
     statistics.modelCount           = static_cast<std::uint32_t>(models.size());

@@ -4,7 +4,7 @@
 //  GoldSrcAssetConverterCLI <map> [-basedir <directory> [-game <mod>] [-addons] [-nohdmodels]] [-o <directory>]
 //                           [--wad <file.wad>]... [--wad-dir <directory>] [--gltf] [--blueshift] [--external-textures]
 //                           [--visibility] [--collision] [--scale <factor>] [--emissive-scale <factor>]
-//                           [--point-light-intensity-scale <factor>]
+//                           [--point-light-intensity-scale <factor>] [--environment-light-intensity-scale <factor>]
 //
 //Without -basedir, <map> and the WAD files are paths of the local file system. With -basedir, the tool loads
 //filesystem_stdio.dll from beside the executable and mounts the game's search paths as the engine does (see
@@ -118,9 +118,10 @@ static int Usage()
     std::cerr << "usage: GoldSrcAssetConverterCLI <map> [-basedir <directory> [-game <mod>] [-addons] [-nohdmodels]] [-o <directory>]\n"
                  "                                [--wad <file.wad>]... [--wad-dir <directory>] [--gltf] [--blueshift] [--external-textures]\n"
                  "                                [--visibility] [--collision] [--scale <factor>] [--emissive-scale <factor>]\n"
-                 "                                [--point-light-intensity-scale <factor>]\n"
+                 "                                [--point-light-intensity-scale <factor>] [--environment-light-intensity-scale <factor>]\n"
                  "  --emissive-scale: texture emission multiplier (default 4; 0 disables emission)\n"
                  "  --point-light-intensity-scale: point light multiplier (default 1; 0 keeps entities without lights)\n"
+                 "  --environment-light-intensity-scale: light_environment sun multiplier in lux (default 3; 0 keeps entities without lights)\n"
                  "  --no-area-lights: write an empty area light sidecar\n"
                  "  --area-lights-per-group <1-64>: rectangle budget per emitter (default 16)\n";
 
@@ -554,7 +555,7 @@ int main(int argc, char** argv)
         }
         else if (argument == "--scale" && bValue)
             request.options.scaleFactor = std::strtof(argv[++i], nullptr);
-        else if ((argument == "--emissive-scale" || argument == "--point-light-intensity-scale") && bValue)
+        else if ((argument == "--emissive-scale" || argument == "--point-light-intensity-scale" || argument == "--environment-light-intensity-scale") && bValue)
         {
             const auto* szValue = argv[++i];
             char*       pEnd{};
@@ -569,8 +570,10 @@ int main(int argc, char** argv)
 
             if (argument == "--emissive-scale")
                 request.options.emissiveScale = scale;
-            else
+            else if (argument == "--point-light-intensity-scale")
                 request.options.pointLightIntensityScale = scale;
+            else
+                request.options.environmentLightIntensityScale = scale;
         }
         else if (input.empty() && argument[0] != '-')
             input = argument;

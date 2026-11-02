@@ -132,11 +132,44 @@ parsing. Invalid parameters or final intensities exceeding float range fail with
 is published. Malformed entity values instead produce an `InvalidEntityValue` warning and omit only that light.
 
 Lights are constant: `style`, `pattern` and `spawnflags` remain metadata and do not animate or turn off the exported
-light. `bPreservePointEntities = false` omits both entities and their lights. `light_spot`, `light_environment` and
-lights already removed from the BSP are not converted. `KHR_lights_punctual` is listed in `extensionsUsed` only
-when lights exist, and is not required. This is a relighting starting point, not a physical equivalence to HLRAD.
-The parameter is included in the cache key. The current request layout requires `UtilGoldSrcAssetConverterAPI_004`;
-old interface versions are rejected. ConverterVersion is 10 and the extras schema remains 1.
+light. `bPreservePointEntities = false` omits both entities and their lights. `light_spot` and lights already removed
+from the BSP are not converted; `light_environment` becomes a directional light (see below). `KHR_lights_punctual` is
+listed in `extensionsUsed` only when lights exist, and is not required. This is a relighting starting point, not a
+physical equivalence to HLRAD. The parameter is included in the cache key. The current request layout requires
+`UtilGoldSrcAssetConverterAPI_005`; old interface versions are rejected. ConverterVersion is 11 and the extras schema
+remains 1.
+
+## Environment light
+
+The first preserved point entity, in lump order, whose classname is exactly `light_environment` gains a
+`<entity-node-name>_DirectionalLight` child with `KHR_lights_punctual` type `directional`: the sun HLRAD bakes into
+the surfaces that see the sky. As for point lights, the entity stays an Empty with its name, transform and extras,
+the child has no entity identity, and entity statistics do not count it.
+
+The direction is the sky vector HLSDK's `CEnvLight::Spawn` computes from the entity's angles. Keys apply in file
+order: `angles` and `angle` as for every entity (see "Entity transforms"), and `pitch`, which `CLight::KeyValue`
+writes into the pitch of the angles for the classes `light`, `light_spot` and `light_environment` only (other classes,
+such as `ambient_generic`, use `pitch` for something else). `UTIL_MakeAimVectors` negates the pitch before
+`AngleVectors`, so for pitch `p` and yaw `y` the light shines along `(cos p cos y, cos p sin y, sin p)` in GoldSrc
+coordinates; `pitch -90` points straight down. The entity node keeps the engine's rotation, which ignores `pitch`;
+the child's rotation cancels it and turns glTF's light axis -z into that direction. `angle -1` and `-2` set the pitch
+as `ED_ParseEntity` does, -90 and 90, so the sun points down and up respectively; stock maps use `pitch` instead.
+
+`_light` is read as for point lights (`V`, `P = max(V)`, color `V / P`, white with intensity 0 for zero
+contributions). The intensity is illuminance, `P * options.environmentLightIntensityScale` lux; unlike point lights it
+does not depend on `scaleFactor`, since a directional light has no distance falloff. `environmentLightIntensityScale`
+defaults to **3**, independently of the point light and emission multipliers, must be finite and nonnegative, and is
+part of the cache key. The default was chosen in the path traced cs_assault with point lights scaled by 100000 at
+exposure 1: shaded streets then match the brightness of the original lightmaps, while sunlit ground is brighter than
+the lightmaps, which barely separate it from the shade. 0 omits the light, keeps the entity and skips parsing its values. Invalid parameters and final
+intensities exceeding float range fail with `InvalidRequest` before any output is published.
+
+Maps often repeat `light_environment` with the same values. Only the first valid entity adds a light: a malformed
+`_light` is an `InvalidEntityValue` warning and the next entity is tried, and a later entity whose direction, color
+or brightness differs from the converted one is reported as `DuplicateEnvironmentLight` and not converted. Repeats
+with the same values are not reported. The light is constant: `style` and the sky's diffuse light (`_diffuse_light`
+of later compilers) are not converted, and the sky box is not an environment light. A renderer tracing shadow rays
+must let them leave through the sky faces: the converted `World_Sky` geometry encloses outdoor areas as the BSP does.
 
 ## Faces
 
@@ -180,7 +213,7 @@ texture lights. This table needs no SDK installation and does not read external 
 intensity, or 0 to omit texture emission entirely while retaining the PBR material and alpha clipping. Negative,
 nonfinite and overflowing values fail with `InvalidRequest`; final emission strengths must fit in a float. The
 multiplier is included in the cache key and changes neither base colors nor baked lightmap data. ConverterVersion
-is 10. The public interface is `UtilGoldSrcAssetConverterAPI_004` because the options/request layout changed;
+is 11. The public interface is `UtilGoldSrcAssetConverterAPI_005` because the options/request layout changed;
 callers must rebuild against the new header. `extras.goldsrc` remains schema version 1.
 
 ### Adjacent LTC area light descriptors
@@ -282,7 +315,7 @@ writes one model, the world:
 ```json
 {
   "schemaVersion": 2,
-  "converterVersion": 10,
+  "converterVersion": 11,
   "bspSha256": "<SHA-256 of the BSP bytes, lowercase hex>",
   "unitScale": 0.0254,
   "models": ["c1a0/c1a0.glb"],
@@ -395,6 +428,7 @@ GoldSrcAssetConverterCLI <map> [-basedir <directory> [-game <mod>] [-addons] [-n
                          [--wad <file.wad>]... [--wad-dir <directory>] [--gltf] [--blueshift] [--external-textures]
                          [--visibility] [--collision] [--scale <factor>]
                          [--emissive-scale <factor>] [--point-light-intensity-scale <factor>]
+                         [--environment-light-intensity-scale <factor>]
 ```
 
 `--emissive-scale` overrides the default texture emission multiplier of 4; for example,
@@ -404,6 +438,9 @@ Use `--emissive-scale 0` to disable texture emission. Invalid numeric strings ar
 `--point-light-intensity-scale` independently adjusts entity point lights (default 1). Use 0 to retain the original
 entity nodes without generating lights; it does not change texture emission. For example,
 `GoldSrcAssetConverterCLI c1a0 -basedir <game-directory> --point-light-intensity-scale 4 -o <output-directory>`.
+
+`--environment-light-intensity-scale` sets the lux per `_light` brightness unit of the `light_environment` sun
+(default 3). Use 0 to retain the entity without generating the directional light.
 
 Without `-basedir`, the map and the WAD files are local paths. With `-basedir`, the tool loads `filesystem_stdio.dll`
 (not built by this project; see the README) from its own directory and mounts the search paths the engine's `FileSystem_SetGameDirectory` mounts for an English,

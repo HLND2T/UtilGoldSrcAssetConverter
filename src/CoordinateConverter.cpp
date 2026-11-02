@@ -25,6 +25,11 @@ Quaternion MultiplyQuaternions(const Quaternion& a, const Quaternion& b)
     };
 }
 
+Quaternion InvertRotation(const Quaternion& rotation)
+{
+    return {PositiveZero(-rotation.x), PositiveZero(-rotation.y), PositiveZero(-rotation.z), rotation.w};
+}
+
 Quaternion MakeAxisRotation(double angle, double axisX, double axisY, double axisZ)
 {
     const auto halfAngle = angle * s_Pi / s_HalfTurn * s_Half;

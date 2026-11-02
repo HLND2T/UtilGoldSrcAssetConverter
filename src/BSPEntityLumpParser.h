@@ -68,11 +68,16 @@ struct BSPEntityInfo
     bool                   bHasAngles{};
     GoldSrcRender::Vector3 origin;
     GoldSrcRender::Vector3 angles;
+    //The angles HLSDK's CLight classes (light, light_spot, light_environment) end with: angles, with the "pitch" key
+    //setting the pitch as CLight::KeyValue does, in key order. The engine draws the entity by angles; the game aims
+    //its light by these. Equal to angles for other classes.
+    GoldSrcRender::Vector3 lightAngles;
     BSPEntityAngleUsage    angleUsage{BSPEntityAngleUsage::Rotation};
 };
 
 //Interprets an entity of a file of modelCount models. origin and angles are parsed as the engine parses vectors
-//(three numbers, missing ones 0), and the "angle" key turned into angles as ED_ParseEntity does. Values that are not
+//(three numbers, missing ones 0), and the "angle" key turned into angles as ED_ParseEntity does; the "pitch" key of
+//light classes only changes lightAngles. Values that are not
 //numbers are appended to invalidValues as "key" names.
 BSPEntityInfo InterpretBSPEntity(const BSPEntity& entity, std::uint32_t modelCount, std::vector<std::string>& invalidValues);
 } // namespace GoldSrcAssetConverter

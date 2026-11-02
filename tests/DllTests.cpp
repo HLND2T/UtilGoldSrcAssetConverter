@@ -100,6 +100,7 @@ int main(int argc, char** argv)
     Require(!factory("UtilGoldSrcAssetConverterAPI_001", nullptr), "the request layout without emissiveScale is refused");
     Require(!factory("UtilGoldSrcAssetConverterAPI_002", nullptr), "the request layout without pointLightIntensityScale is refused");
     Require(!factory("UtilGoldSrcAssetConverterAPI_003", nullptr), "the request layout without area light options is refused");
+    Require(!factory("UtilGoldSrcAssetConverterAPI_004", nullptr), "the request layout without environmentLightIntensityScale is refused");
 
     auto* pConverter = static_cast<IUtilGoldSrcAssetConverter*>(factory(UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION, nullptr));
     Require(pConverter, "the converter interface is published");
@@ -154,6 +155,13 @@ int main(int argc, char** argv)
     const std::string disabledAsset(disabledLightSink.m_Files.front().begin(), disabledLightSink.m_Files.front().end());
     Require(disabledAsset.find("KHR_lights_punctual") == std::string::npos && std::strcmp(summary.szCacheKey, disabledLights.szCacheKey) != 0, "the DLL option disables lights and changes the cache key");
     request.options.pointLightIntensityScale = 1;
+
+    CCollectingOutputSink disabledEnvironmentSink(true);
+    request.pOutputSink                            = &disabledEnvironmentSink;
+    request.options.environmentLightIntensityScale = 0;
+    const auto disabledEnvironment                 = pConverter->ConvertBSP(request);
+    Require(disabledEnvironment.error == ConversionError::None && std::strcmp(summary.szCacheKey, disabledEnvironment.szCacheKey) != 0, "the DLL accepts the environment light scale option, which changes the cache key");
+    request.options.environmentLightIntensityScale = BSPConversionOptions{}.environmentLightIntensityScale;
 
     //Requests without output sink fail with a message.
     request.pOutputSink = nullptr;

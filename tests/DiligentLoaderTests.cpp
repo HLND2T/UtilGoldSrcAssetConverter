@@ -126,6 +126,31 @@ static void TestColoredPointLight(const std::filesystem::path& path)
             "the loader preserves a colored point light");
 }
 
+static void TestDirectionalLight(const std::filesystem::path& path)
+{
+    const auto            fileName = path.string();
+    GLTF::ModelCreateInfo createInfo;
+    createInfo.FileName = fileName.c_str();
+    GLTF::Model model{nullptr, nullptr, createInfo};
+    const auto* pNode = FindNode(model, "ent_0010_light_environment_DirectionalLight");
+    Require(model.Lights.size() == 1 && pNode && pNode->pLight == &model.Lights[0] && pNode->pLight->Type == GLTF::Light::TYPE::DIRECTIONAL, "the light_environment child loads its directional light");
+    //"_light" 100 times the default multiplier 3.
+    constexpr float s_SunIlluminance = 300;
+    Require(std::fabs(s_SunIlluminance - pNode->pLight->Intensity) < s_Tolerance, "the loader preserves the directional light illuminance");
+
+    //Pitch -60, yaw 0: GoldSrc (cos 60, 0, -sin 60) is glTF (cos 60, -sin 60, 0); lights shine along their -z row.
+    GLTF::ModelTransforms transforms;
+    model.ComputeTransforms(0, transforms);
+    const auto&     global     = transforms.NodeGlobalMatrices[pNode->Index];
+    constexpr float s_CosPitch = 0.5f;
+    constexpr float s_SinPitch = 0.8660254f;
+    const float     scale      = std::sqrt(global._31 * global._31 + global._32 * global._32 + global._33 * global._33);
+    const float     directionX = -global._31 / scale;
+    const float     directionY = -global._32 / scale;
+    const float     directionZ = -global._33 / scale;
+    Require(std::fabs(s_CosPitch - directionX) < s_Tolerance && std::fabs(s_SinPitch + directionY) < s_Tolerance && std::fabs(directionZ) < s_Tolerance, "the directional light points along the converted sky vector");
+}
+
 static void TestTextureLight(const std::filesystem::path& path)
 {
     const auto            fileName = path.string();
@@ -176,6 +201,7 @@ int main(int argc, char** argv)
     TestDocument(directory / "converter_emissive.glb");
     TestTextureLight(directory / "converter_emissive.glb");
     TestColoredPointLight(directory / "converter_point_lights.glb");
+    TestDirectionalLight(directory / "converter_environment_light.glb");
 
     std::cout << "DiligentTools GLTF loader tests passed\n";
 
