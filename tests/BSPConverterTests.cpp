@@ -1332,6 +1332,22 @@ static std::size_t PointLightCount(const Document& document)
     return document.gltf.value("extensions", json::object()).value("KHR_lights_punctual", json::object()).value("lights", json::array()).size();
 }
 
+//Indices of the directional lights of a document.
+static std::vector<std::size_t> DirectionalLights(const Document& document)
+{
+    const auto lights = document.gltf.value("extensions", json::object()).value("KHR_lights_punctual", json::object()).value("lights", json::array());
+
+    std::vector<std::size_t> indices;
+
+    for (std::size_t i = 0; i < lights.size(); ++i)
+    {
+        if (lights[i]["type"] == "directional")
+            indices.push_back(i);
+    }
+
+    return indices;
+}
+
 static const json& EntityPointLight(const Document& document)
 {
     const auto entity = FindEntityNode(document, ConverterTestLightEntity);
@@ -1410,7 +1426,7 @@ static void TestPointLightEntities()
     {
         ConversionRun run;
         const auto    document = ConvertAndParse(MakeBSPWithLightFields("\"_light\" \"100\"\n", szClass), {}, run);
-        Require(PointLightCount(document) == 0 && FindEntityNode(document, ConverterTestLightEntity) >= 0, "only the exact light class is converted");
+        Require(PointLightCount(document) == DirectionalLights(document).size() && FindEntityNode(document, ConverterTestLightEntity) >= 0, "only the exact light class is converted to a point light");
     }
 
     std::string multipleEntities = ConverterTestEntities;
@@ -1504,6 +1520,221 @@ static void TestPointLightIntensityScale()
     ConversionRun omittedRun;
     const auto    omitted = ConvertAndParse(file, options, omittedRun);
     Require(PointLightCount(omitted) == 0 && FindEntityNode(omitted, ConverterTestLightEntity) < 0, "omitting point entities also omits their lights");
+}
+
+//The first entity appended to ConverterTestEntities.
+constexpr std::uint32_t s_AppendedEntity = 10;
+
+static std::vector<std::uint8_t> MakeBSPWithEntities(const std::string& appended)
+{
+    const auto entities = ConverterTestEntities + appended;
+
+    return AssembleTestBSP(MakeConverterTestLumps(entities.c_str()));
+}
+
+static std::string MakeEnvironmentEntity(const std::string& fields)
+{
+    return "{\n\"classname\" \"light_environment\"\n\"origin\" \"-16 32 96\"\n" + fields + "}\n";
+}
+
+//The node of the directional light generated for an entity, checked like the point light children.
+static int EnvironmentLightNode(const Document& document, std::uint32_t entity)
+{
+    const auto entityNode = FindEntityNode(document, entity);
+    Require(entityNode >= 0 && DirectionalLights(document).size() == 1, "the light_environment entity and one directional light are exported");
+    const auto& node = document.gltf["nodes"][entityNode];
+    Require(!node.value("extensions", json::object()).contains("KHR_lights_punctual") && node.value("children", json::array()).size() == 1, "the original entity remains an empty node with one light child");
+    const auto  child     = node["children"][0].get<int>();
+    const auto& lightNode = document.gltf["nodes"][child];
+    Require(lightNode["name"] == node["name"].get<std::string>() + "_DirectionalLight" && !lightNode.contains("extras") && !lightNode.contains("mesh") && !lightNode.contains("translation"), "the light child has no entity identity, mesh or translation");
+    Require(lightNode["extensions"]["KHR_lights_punctual"]["light"].get<std::size_t>() == DirectionalLights(document)[0], "the child references the directional light");
+
+    return child;
+}
+
+//The direction a light node shines in: glTF lights shine along their local -z.
+static Vec3 LightDirection(const Document& document, int node)
+{
+    const auto matrix = GlobalMatrix(document, node);
+    const auto origin = Transform(matrix, {});
+    const auto tip    = Transform(matrix, {0, 0, -1});
+    const Vec3 delta  = {tip.x - origin.x, tip.y - origin.y, tip.z - origin.z};
+    const auto length = std::sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+
+    return {delta.x / length, delta.y / length, delta.z / length};
+}
+
+//The glTF direction of the GoldSrc sky vector of a pitch and yaw in degrees: CEnvLight aims along
+//(cos p cos y, cos p sin y, sin p), and the root turns GoldSrc (x, y, z) into glTF (x, z, -y).
+static Vec3 ExpectedSkyDirection(double pitch, double yaw)
+{
+    constexpr double s_Pi           = 3.14159265358979323846;
+    constexpr double s_HalfTurn     = 180;
+    const double     pitchRadians   = pitch * s_Pi / s_HalfTurn;
+    const double     yawRadians     = yaw * s_Pi / s_HalfTurn;
+    const Vec3       goldSrcForward = {std::cos(pitchRadians) * std::cos(yawRadians), std::cos(pitchRadians) * std::sin(yawRadians), std::sin(pitchRadians)};
+
+    return {goldSrcForward.x, goldSrcForward.z, -goldSrcForward.y};
+}
+
+//The default lux per "_light" brightness unit of the environment light.
+constexpr double s_DefaultEnvironmentLightScale = 3;
+
+static void TestEnvironmentLight()
+{
+    BSPConversionOptions defaults;
+    Require(defaults.environmentLightIntensityScale == s_DefaultEnvironmentLightScale, "the public environment light multiplier defaults to three");
+
+    ConversionRun baselineRun;
+    const auto    baseline = ConvertAndParse(MakeConverterTestBSP(), {}, baselineRun);
+    Require(DirectionalLights(baseline).empty(), "maps without light_environment have no directional light");
+
+    //Key orders of stock maps (cs_assault, de_dust2) and the angles key alone, which also rotates the entity node.
+    struct DirectionCase
+    {
+        const char* fields;
+        double      pitch;
+        double      yaw;
+    };
+    const DirectionCase directions[] = {
+        {"\"pitch\" \"-60\"\n\"angle\" \"45\"\n", -60, 45},
+        {"\"angles\" \"0 0 0\"\n\"angle\" \"43\"\n\"pitch\" \"-60\"\n", -60, 43},
+        {"\"angles\" \"-30 90 0\"\n", -30, 90},
+        {"\"angles\" \"-30 90 15\"\n\"pitch\" \"-75\"\n", -75, 90},
+        {"\"pitch\" \"-45\"\n\"angles\" \"-20 180 0\"\n", -20, 180},
+        {"", 0, 0}};
+
+    for (const auto& test : directions)
+    {
+        ConversionRun run;
+        const auto    document = ConvertAndParse(MakeBSPWithEntities(MakeEnvironmentEntity(test.fields)), {}, run);
+        const auto    node     = EnvironmentLightNode(document, s_AppendedEntity);
+        Require(Near(ExpectedSkyDirection(test.pitch, test.yaw), LightDirection(document, node), s_UnitTolerance), "the light shines along the sky vector of the light angles, cancelling the entity rotation");
+        Require(!HasDiagnostic(run.result, DiagnosticCode::InvalidEntityValue) && !HasDiagnostic(run.result, DiagnosticCode::DuplicateEnvironmentLight), "valid light_environment keys cause no warning");
+        Require(run.result.statistics.entityCount == baselineRun.result.statistics.entityCount + 1 && run.result.statistics.pointEntityNodeCount == baselineRun.result.statistics.pointEntityNodeCount + 1, "the light child does not change entity statistics");
+    }
+
+    //"_light" is read as for point lights; illuminance ignores the scene scale.
+    struct LightCase
+    {
+        const char*           fields;
+        std::array<double, 3> contribution;
+    };
+    const LightCase lights[] = {
+        {"", {300, 300, 300}},
+        {"\"_light\" \"155 107 235 50\"\n", {155.0 * 50 / 255, 107.0 * 50 / 255, 235.0 * 50 / 255}},
+        {"\"_light\" \"250 240 200\"\n", {250, 240, 200}},
+        {"\"_light\" \"0 0 0\"\n", {0, 0, 0}}};
+
+    for (const auto& test : lights)
+    {
+        for (const auto scale : {1.0f, 2.0f})
+        {
+            BSPConversionOptions options;
+            options.scaleFactor = scale;
+            ConversionRun run;
+            const auto    document  = ConvertAndParse(MakeBSPWithEntities(MakeEnvironmentEntity(std::string("\"pitch\" \"-60\"\n") + test.fields)), options, run);
+            const auto    node      = EnvironmentLightNode(document, s_AppendedEntity);
+            const auto&   light     = document.gltf["extensions"]["KHR_lights_punctual"]["lights"][DirectionalLights(document)[0]];
+            const auto    color     = light.value("color", std::array<double, 3>{1, 1, 1});
+            const auto    intensity = light.value("intensity", 1.0);
+
+            if (intensity == 0)
+                Require(color == std::array<double, 3>{1, 1, 1}, "zero source contributions export a white zero-intensity light");
+
+            for (std::size_t channel = 0; channel < color.size(); ++channel)
+                Require(color[channel] >= 0 && color[channel] <= 1 && std::fabs(color[channel] * intensity - test.contribution[channel] * s_DefaultEnvironmentLightScale) < s_UnitTolerance, "light color times intensity preserves linear source contributions at any scene scale");
+
+            Require(Near(ExpectedSkyDirection(-60, 0), LightDirection(document, node), s_UnitTolerance), "the scene scale does not change the direction");
+        }
+    }
+
+    const auto file = MakeBSPWithEntities(MakeEnvironmentEntity("\"_light\" \"100\"\n\"pitch\" \"-60\"\n"));
+    const auto run  = Convert(file, {});
+    Require(run.result.bSuccess, "the light_environment fixture converts");
+
+    for (const auto scale : {0.0f, 0.5f, 4.0f})
+    {
+        BSPConversionOptions options;
+        options.environmentLightIntensityScale = scale;
+        ConversionRun scaledRun;
+        const auto    document = ConvertAndParse(file, options, scaledRun);
+        Require(run.result.cacheKey != scaledRun.result.cacheKey && run.result.sourceHash == scaledRun.result.sourceHash, "the environment light multiplier changes only the options part of the cache key");
+        Require(PointLightCount(document) == DirectionalLights(document).size() + 1, "the environment light multiplier does not change point lights");
+
+        if (scale == 0)
+            Require(DirectionalLights(document).empty() && !document.gltf["nodes"][FindEntityNode(document, s_AppendedEntity)].contains("children"), "zero disables the directional light and keeps the entity empty");
+        else
+        {
+            const auto& light = document.gltf["extensions"]["KHR_lights_punctual"]["lights"][DirectionalLights(document)[0]];
+            Require(std::fabs(100.0 * scale - light.value("intensity", 1.0)) < s_UnitTolerance, "custom multipliers scale the illuminance");
+        }
+    }
+
+    //A directional light alone still declares the extension.
+    BSPConversionOptions noPointLights;
+    noPointLights.pointLightIntensityScale = 0;
+    ConversionRun sunOnlyRun;
+    const auto    sunOnly = ConvertAndParse(file, noPointLights, sunOnlyRun);
+    const auto    used    = sunOnly.gltf.value("extensionsUsed", std::vector<std::string>{});
+    const auto    req     = sunOnly.gltf.value("extensionsRequired", std::vector<std::string>{});
+    Require(PointLightCount(sunOnly) == 1 && std::count(used.begin(), used.end(), "KHR_lights_punctual") == 1 && std::count(req.begin(), req.end(), "KHR_lights_punctual") == 0, "a lone directional light declares the optional extension");
+    WriteOutput("converter_environment_light.glb", sunOnlyRun.result.data);
+
+    BSPConversionOptions options;
+
+    for (const auto invalid : {-1.0f, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()})
+    {
+        options.environmentLightIntensityScale = invalid;
+        const auto invalidRun                  = Convert(file, options);
+        Require(invalidRun.result.error == ConversionError::InvalidRequest && !invalidRun.result.errorMessage.empty() && invalidRun.result.data.empty(), "invalid environment light scales fail without publishing output");
+    }
+
+    options.environmentLightIntensityScale = 1;
+    options.bEmbedTextures                 = false;
+    const auto overflow                    = Convert(MakeBSPWithEntities(MakeEnvironmentEntity("\"_light\" \"1e300\"\n")), options);
+    Require(overflow.result.error == ConversionError::InvalidRequest && overflow.result.data.empty() && overflow.result.externalFiles.empty(), "an unrepresentable final illuminance fails without publishing an asset or images");
+    options.bEmbedTextures = true;
+
+    options.environmentLightIntensityScale = 0;
+    ConversionRun disabledRun;
+    const auto    disabled = ConvertAndParse(MakeBSPWithEntities(MakeEnvironmentEntity("\"_light\" \"bad\"\n") + MakeEnvironmentEntity("\"_light\" \"1e300\"\n")), options, disabledRun);
+    Require(DirectionalLights(disabled).empty() && !HasDiagnostic(disabledRun.result, DiagnosticCode::InvalidEntityValue), "disabled conversion skips light parsing, warnings and overflow");
+    options.environmentLightIntensityScale = 1;
+
+    //A malformed entity is warned and skipped; the next one is converted.
+    ConversionRun malformedRun;
+    const auto    malformed = ConvertAndParse(MakeBSPWithEntities(MakeEnvironmentEntity("\"_light\" \"1 2\"\n") + MakeEnvironmentEntity("\"_light\" \"50\"\n")), {}, malformedRun);
+    Require(HasDiagnostic(malformedRun.result, DiagnosticCode::InvalidEntityValue) && FindEntityNode(malformed, s_AppendedEntity) >= 0, "a malformed light_environment is reported and keeps its entity");
+    EnvironmentLightNode(malformed, s_AppendedEntity + 1);
+
+    ConversionRun badPitchRun;
+    ConvertAndParse(MakeBSPWithEntities(MakeEnvironmentEntity("\"pitch\" \"inf\"\n")), {}, badPitchRun);
+    Require(HasDiagnostic(badPitchRun.result, DiagnosticCode::InvalidEntityValue), "a nonnumeric pitch is reported");
+    ConversionRun soundPitchRun;
+    ConvertAndParse(MakeBSPWithEntities("{\n\"classname\" \"ambient_generic\"\n\"origin\" \"0 0 0\"\n\"pitch\" \"inf\"\n}\n"), {}, soundPitchRun);
+    Require(!HasDiagnostic(soundPitchRun.result, DiagnosticCode::InvalidEntityValue), "the pitch key of other classes is not an angle");
+
+    //Repeated entities: only the first adds a light, and only different ones are reported.
+    const auto    repeatedFields = std::string("\"_light\" \"250 240 200 80\"\n\"pitch\" \"-60\"\n\"angle\" \"122\"\n");
+    ConversionRun sameRun;
+    const auto    same     = ConvertAndParse(MakeBSPWithEntities(MakeEnvironmentEntity(repeatedFields) + MakeEnvironmentEntity(repeatedFields)), {}, sameRun);
+    const auto    sameNode = EnvironmentLightNode(same, s_AppendedEntity);
+    const auto&   second   = same.gltf["nodes"][FindEntityNode(same, s_AppendedEntity + 1)];
+    Require(sameNode >= 0 && !second.contains("children") && !HasDiagnostic(sameRun.result, DiagnosticCode::DuplicateEnvironmentLight), "an identical repeated light_environment adds no light and no warning");
+
+    for (const auto* szOther : {"\"_light\" \"250 240 200 90\"\n\"pitch\" \"-60\"\n\"angle\" \"122\"\n", "\"_light\" \"250 240 200 80\"\n\"pitch\" \"-50\"\n\"angle\" \"122\"\n"})
+    {
+        ConversionRun differentRun;
+        const auto    different = ConvertAndParse(MakeBSPWithEntities(MakeEnvironmentEntity(repeatedFields) + MakeEnvironmentEntity(szOther)), {}, differentRun);
+        EnvironmentLightNode(different, s_AppendedEntity);
+        Require(HasDiagnostic(differentRun.result, DiagnosticCode::DuplicateEnvironmentLight), "a different repeated light_environment is reported and not converted");
+    }
+
+    options.bPreservePointEntities = false;
+    ConversionRun omittedRun;
+    const auto    omitted = ConvertAndParse(file, options, omittedRun);
+    Require(DirectionalLights(omitted).empty() && FindEntityNode(omitted, s_AppendedEntity) < 0, "omitting point entities also omits the directional light");
 }
 
 //16.8 Special surfaces keep their GoldSrc semantics; textures come from the resolver, WADs or the BSP itself.
@@ -2130,6 +2361,7 @@ int main(int argc, char** argv)
     TestEntityKeyValues();
     TestPointLightEntities();
     TestPointLightIntensityScale();
+    TestEnvironmentLight();
     TestTransforms();
     TestLightmaps();
     TestPBRMaterials();

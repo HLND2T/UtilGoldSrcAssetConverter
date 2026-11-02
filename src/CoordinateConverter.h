@@ -23,6 +23,9 @@ struct Quaternion
 
 Quaternion MultiplyQuaternions(const Quaternion& a, const Quaternion& b);
 
+//The inverse of a unit quaternion, its conjugate.
+Quaternion InvertRotation(const Quaternion& rotation);
+
 //Rotation by angle degrees counterclockwise about a unit axis, as glRotatef.
 Quaternion MakeAxisRotation(double angle, double axisX, double axisY, double axisZ);
 

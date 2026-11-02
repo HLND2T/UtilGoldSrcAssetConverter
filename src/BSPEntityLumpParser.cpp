@@ -23,6 +23,9 @@ constexpr std::size_t BSPVectorComponents = 3;
 static const char* const s_MoveDirectionClasses[] = {"func_door", "func_water", "momentary_door", "func_button", "func_conveyor", "func_plat", "func_platrot"};
 static const char        s_TriggerClassPrefix[]   = "trigger_";
 
+//Classes of HLSDK's CLight, whose KeyValue sets the pitch of the entity's angles from the "pitch" key.
+static const char* const s_LightClasses[] = {"light", "light_spot", "light_environment"};
+
 const std::string* BSPEntity::FindValue(const char* szKey) const
 {
     const std::string* pValue = nullptr;
@@ -229,6 +232,29 @@ static BSPEntityAngleUsage GetAngleUsage(const std::string& classname)
     return BSPEntityAngleUsage::Rotation;
 }
 
+static bool IsLightClass(const std::string& classname)
+{
+    for (const auto* szClass : s_LightClasses)
+    {
+        if (classname == szClass)
+            return true;
+    }
+
+    return false;
+}
+
+//The angles after an "angle" key of the given yaw, as ED_ParseEntity writes them.
+static GoldSrcRender::Vector3 ApplyAngleKey(const GoldSrcRender::Vector3& angles, float yaw)
+{
+    if (yaw >= 0)
+        return {angles.x, yaw, angles.z};
+
+    if (static_cast<int>(yaw) == static_cast<int>(BSPAngleUp))
+        return {BSPUpPitch, 0, 0};
+
+    return {BSPDownPitch, 0, 0};
+}
+
 static std::string TrimKey(const std::string& key)
 {
     auto length = key.size();
@@ -269,6 +295,8 @@ BSPEntityInfo InterpretBSPEntity(const BSPEntity& entity, std::uint32_t modelCou
     }
 
     //The pairs are applied in order, as the game DLL receives them.
+    const bool bLightClass = IsLightClass(info.classname);
+
     for (const auto& pair : entity.keyValues)
     {
         const auto key = TrimKey(pair.key);
@@ -285,7 +313,8 @@ BSPEntityInfo InterpretBSPEntity(const BSPEntity& entity, std::uint32_t modelCou
             if (!ParseVector(pair.value, info.angles))
                 invalidValues.push_back(key);
 
-            info.bHasAngles = true;
+            info.lightAngles = info.angles;
+            info.bHasAngles  = true;
         }
         else if (key == "angle")
         {
@@ -293,14 +322,22 @@ BSPEntityInfo InterpretBSPEntity(const BSPEntity& entity, std::uint32_t modelCou
 
             if (!std::isfinite(yaw))
                 invalidValues.push_back(key);
-            else if (yaw >= 0)
-                info.angles = {info.angles.x, yaw, info.angles.z};
-            else if (static_cast<int>(yaw) == static_cast<int>(BSPAngleUp))
-                info.angles = {BSPUpPitch, 0, 0};
             else
-                info.angles = {BSPDownPitch, 0, 0};
+            {
+                info.angles      = ApplyAngleKey(info.angles, yaw);
+                info.lightAngles = ApplyAngleKey(info.lightAngles, yaw);
+            }
 
             info.bHasAngles = true;
+        }
+        else if (key == "pitch" && bLightClass)
+        {
+            const auto pitch = static_cast<float>(std::atof(pair.value.c_str()));
+
+            if (!std::isfinite(pitch))
+                invalidValues.push_back(key);
+            else
+                info.lightAngles = {pitch, info.lightAngles.y, info.lightAngles.z};
         }
     }
 

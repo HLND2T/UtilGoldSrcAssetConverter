@@ -68,6 +68,12 @@ struct BSPConversionOptions
     //scaleFactor squared to preserve illumination when scaling the map. Final intensities must fit in a float.
     float pointLightIntensityScale{1.0f};
 
+    //Multiplier for the constant directional light generated as a child of the first preserved "light_environment"
+    //entity, in lux per unit of its "_light" brightness. Finite and nonnegative; 0 disables conversion and leaves the
+    //entity nodes intact. Directional illuminance does not depend on scaleFactor. The final intensity must fit in a
+    //float. The default 3 matches the shaded outdoor brightness of the GoldSrc lightmaps of cs_assault.
+    float environmentLightIntensityScale{3.0f};
+
     //Write <resource>/<resource>.sh9/area-lights.json, including an empty list when disabled to replace stale
     //descriptors.
     bool          bExportAreaLights{true};
@@ -109,7 +115,10 @@ enum class DiagnosticCode : std::uint32_t
     NonUTF8Text,
     InvalidEntityValue,
     ZeroLengthNormal,
-    ConversionFailure
+    ConversionFailure,
+    //A "light_environment" after the first exported one, with a different direction, color or brightness; only the
+    //first is converted.
+    DuplicateEnvironmentLight
 };
 
 //szMessage is borrowed for the duration of the sink call.
@@ -243,7 +252,7 @@ struct ConversionStatistics
 //Capacities of the strings of a summary, terminator included: a lowercase hex SHA-256 digest, the cache key and the
 //error message.
 constexpr std::uint32_t SHA256HexCapacity    = 65;
-constexpr std::uint32_t CacheKeyCapacity     = 256;
+constexpr std::uint32_t CacheKeyCapacity     = 512;
 constexpr std::uint32_t ErrorMessageCapacity = 1024;
 
 //error is ConversionError::None on success, when every file has been written to the output sink. szErrorMessage is
@@ -285,6 +294,6 @@ public:
     virtual bool FindWAD3Texture(const std::uint8_t* pWad, std::uint64_t wadBytes, const char* szName, GoldSrcAssetConverter::ResolvedTexture* pTexture) noexcept = 0;
 };
 
-#    define UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION "UtilGoldSrcAssetConverterAPI_004"
+#    define UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION "UtilGoldSrcAssetConverterAPI_005"
 
 #endif
