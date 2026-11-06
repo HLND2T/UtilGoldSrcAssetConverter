@@ -76,7 +76,7 @@ BSP_Root                      rotation -90° about x, scale = scaleFactor
 │       └── Model_3_Water
 ├── Point_Entities
 │   └── ent_0005_info_player_start   TRS of the entity, entity extras
-└── Sky_Box                   mesh Sky_Box: the sky box images (see "Sky box")
+└── Sky_Box                   mesh Sky_Box: the sky box images, with bExportSkyBoxGeometry (see "Sky box")
 ```
 
 - Every entity of the lump has exactly one node (unless `bPreserveBrushEntities` / `bPreservePointEntities` leave its
@@ -138,7 +138,7 @@ light. `bPreservePointEntities = false` omits both entities and their lights. `l
 from the BSP are not converted; `light_environment` becomes a directional light (see below). `KHR_lights_punctual` is
 listed in `extensionsUsed` only when lights exist, and is not required. This is a relighting starting point, not a
 physical equivalence to HLRAD. The parameter is included in the cache key. The current request layout requires
-`UtilGoldSrcAssetConverterAPI_006`; old interface versions are rejected. ConverterVersion is 12 and the extras schema
+`UtilGoldSrcAssetConverterAPI_007`; old interface versions are rejected. ConverterVersion is 13 and the extras schema
 is 2.
 
 ## Environment light
@@ -185,14 +185,13 @@ instead; a face without image is drawn black. The converter asks the resolver fo
 is reported as `MissingSkyboxTexture`. Without resolver, or for a map without sky texture, the asset's extras only
 name the sky.
 
-With at least one image and `bExportSkyBox` (the default), the converter adds:
+The images are kept as glTF textures, which the extras name. With at least one image, two options control what the
+converter makes of them. `bExportSkyEnvironmentMap` (the default) adds the cube map and the environment light, which
+renderers, path tracers and bakers use; `bExportSkyBoxGeometry` (off by default) adds the `Sky_Box` node, which only
+viewers that show the glTF as it stands need. Each works without the other.
 
-- the `Sky_Box` node, a child of `BSP_Root` beside `BSP_World`, so that it is not part of the world. Its mesh is a cube
-  centered on the map's origin whose faces lie `sv_zmax × 0.57735` away, 4096 × 0.57735 GoldSrc units for the default
-  `sv_zmax`, as `R_DrawSkyBox` sizes the box around the view. Each face is a quad seen from inside, its normal toward
-  the center, with an unlit material `Sky_Box_<suffix>` showing the image (black without one) through a clamped
-  sampler, the texture coordinates half a texel inside the edges as the engine's. Viewers see the sky from inside the
-  map; a renderer that draws the sky around the view, or a baker that traces the world, leaves the node out.
+With `bExportSkyEnvironmentMap`, the converter adds:
+
 - the cube map `<resource>/<resource>.sky.dds`: a DDS file with the DX10 header, one `DXGI_FORMAT_R8G8B8A8_UNORM_SRGB`
   cube without mip levels, faces in Direct3D order (`+x -x +y -y +z -z`) in the axes of the converted scene: Y up,
   as `BSP_Root` turns GoldSrc's `(x, y, z)` into `(x, z, -y)`. Sampled with a scene direction `(x, y, z)`, it shows
@@ -210,8 +209,18 @@ With at least one image and `bExportSkyBox` (the default), the converter adds:
   before the scale applies. The default matches the sky on screen in GoldSrc, whose gamma tables show it about 1.5
   times brighter than its linear texels, after the path tracer's tone mapping at exposure 1.
 
-`bExportSkyBox = false` keeps the images and the extras but writes neither the node, the cube map nor the
-environment light. The extras (`asset.extras.goldsrc.sky`, see the schema) name the sky, the images used and the box.
+With `bExportSkyBoxGeometry`, the converter adds the `Sky_Box` node, a child of `BSP_Root` beside `BSP_World`, so that
+it is not part of the world. Its mesh is a cube centered on the map's origin whose faces lie `sv_zmax × 0.57735` away, 4096 × 0.57735
+GoldSrc units for the default `sv_zmax`, as `R_DrawSkyBox` sizes the box around the view. Each face is a quad seen from
+inside, its normal toward the center, with an unlit material `Sky_Box_<suffix>` showing the image (black without one)
+through a clamped sampler, the texture coordinates half a texel inside the edges as the engine's. Viewers see the sky
+from inside the map; a renderer that draws the sky around the view, or a baker that traces the world, leaves the node
+out: the box is finite, so rays leaving the map would hit it instead of the environment light.
+
+Both options are part of the cache key. Neither changes the map's own sky faces, which `bPreserveSkyGeometry` keeps in
+the models' `Sky` meshes (see "Faces"). Converter versions before 13 had one option, `bExportSkyBox` (on by default),
+for both the node and the cube map. The extras (`asset.extras.goldsrc.sky`, see the schema) name the sky, the images
+used, the cube map and the box.
 
 ## Faces
 
@@ -255,7 +264,7 @@ texture lights. This table needs no SDK installation and does not read external 
 intensity, or 0 to omit texture emission entirely while retaining the PBR material and alpha clipping. Negative,
 nonfinite and overflowing values fail with `InvalidRequest`; final emission strengths must fit in a float. The
 multiplier is included in the cache key and changes neither base colors nor baked lightmap data. ConverterVersion
-is 12. The public interface is `UtilGoldSrcAssetConverterAPI_006` because the options/request layout changed;
+is 13. The public interface is `UtilGoldSrcAssetConverterAPI_007` because the options/request layout changed;
 callers must rebuild against the new header. `extras.goldsrc` is schema version 2.
 
 ### Adjacent LTC area light descriptors
@@ -334,7 +343,7 @@ Every path the output sink receives is relative to its root, in this order:
 | --- | --- |
 | `<resource>/<resource>.glb` or `.gltf` | the asset |
 | `<resource>/textures/<index>_<name>.png` | the external images, without `bEmbedTextures`; the asset's URIs name them relative to it |
-| `<resource>/<resource>.sky.dds` | the sky's cube map, with the sky box (see "Sky box") |
+| `<resource>/<resource>.sky.dds` | the sky's cube map, with `bExportSkyEnvironmentMap` (see "Sky box") |
 | `<resource>/<resource>.sh9/area-lights.json` | the area light descriptor |
 | `<resource>.manifest.json` | the render manifest, written last |
 
@@ -358,7 +367,7 @@ writes one model, the world:
 ```json
 {
   "schemaVersion": 2,
-  "converterVersion": 12,
+  "converterVersion": 13,
   "bspSha256": "<SHA-256 of the BSP bytes, lowercase hex>",
   "unitScale": 0.0254,
   "models": ["c1a0/c1a0.glb"],
@@ -472,8 +481,8 @@ GoldSrcAssetConverterCLI <map> [-basedir <directory> [-game <mod>] [-addons] [-n
                          [--wad <file.wad>]... [--wad-dir <directory>] [--gltf] [--blueshift] [--external-textures]
                          [--visibility] [--collision] [--scale <factor>]
                          [--emissive-scale <factor>] [--point-light-intensity-scale <factor>]
-                         [--environment-light-intensity-scale <factor>] [--no-sky-box]
-                         [--sky-radiance-scale <factor>]
+                         [--environment-light-intensity-scale <factor>] [--no-sky-environment-map]
+                         [--sky-box-geometry] [--sky-radiance-scale <factor>]
 ```
 
 `--emissive-scale` overrides the default texture emission multiplier of 4; for example,
@@ -487,8 +496,9 @@ entity nodes without generating lights; it does not change texture emission. For
 `--environment-light-intensity-scale` sets the lux per `_light` brightness unit of the `light_environment` sun
 (default 0.2). Use 0 to retain the entity without generating the directional light.
 
-`--no-sky-box` exports neither the sky box nor its cube map, and `--sky-radiance-scale` sets the radiance of a white
-sky texel in the manifest's environment light (default 2). The tool reads sky images through the game's file system,
+`--no-sky-environment-map` exports neither the sky's cube map nor its environment light, `--sky-box-geometry` also
+exports the `Sky_Box` node for glTF viewers, and `--sky-radiance-scale` sets the radiance of a white sky texel in the
+manifest's environment light (default 2). The tool reads sky images through the game's file system,
 so only with `-basedir`: `gfx/env/<skyname><suffix>.tga`, then `.bmp`.
 
 Without `-basedir`, the map and the WAD files are local paths. With `-basedir`, the tool loads `filesystem_stdio.dll`
@@ -530,8 +540,8 @@ ctest --test-dir build -C Debug --output-on-failure
 
 - Only BSP30 maps; `.mdl` and `.spr` assets are not converted (their entities are point entities naming the model).
 - Lightmaps are kept as metadata and are not applied to the PBR materials; scene lights or texture emission provide lighting.
-- Sky geometry is kept with a placeholder material. The `Sky_Box` node has a fixed size around the map's origin, not
-  the view; renderers draw the sky from the cube map instead.
+- Sky geometry is kept with a placeholder material. The optional `Sky_Box` node has a fixed size around the map's
+  origin, not the view; renderers draw the sky from the cube map instead.
 - The tool does not decode `.dds` sky images, which the engine tries before `.tga`; such a sky converts only when a
   TGA or BMP image of the same name exists.
 - Water is static geometry; the warp, the wave height and the leaf contents are runtime behavior and only described.

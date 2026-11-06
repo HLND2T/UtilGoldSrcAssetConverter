@@ -80,10 +80,14 @@ struct BSPConversionOptions
     bool          bExportAreaLights{true};
     std::uint32_t maxAreaLightsPerGroup{16}; //Valid range: 1-64.
 
-    //Export the sky box the engine draws for a map with sky faces, when the resolver provides an image of its faces:
-    //the Sky_Box node with a textured cube around the map, and the cube map <resource>/<resource>.sky.dds that the
-    //render manifest names as its environment light.
-    bool bExportSkyBox{true};
+    //Export the sky box the engine draws for a map with sky faces, when the resolver provides an image of its faces.
+    //bExportSkyEnvironmentMap writes the cube map <resource>/<resource>.sky.dds that the render manifest names as its
+    //environment light, which renderers draw around the view and path tracers light the scene with.
+    //bExportSkyBoxGeometry adds the Sky_Box node, a textured cube around the map for viewers that show the glTF as it
+    //stands; renderers and bakers leave it out, so it is off by default. The map's own sky faces are
+    //bPreserveSkyGeometry's.
+    bool bExportSkyEnvironmentMap{true};
+    bool bExportSkyBoxGeometry{false};
 
     //Radiance of a white sky texel in the manifest's environment light; finite and nonnegative. Path tracers light the
     //scene with it; it does not change the sky box's images. The default 2 matches the sky's brightness on screen in
@@ -200,7 +204,7 @@ public:
 
 //Receives the converted files, on the converting thread, with paths relative to the sink's root: the asset itself first,
 //<resource>/<resource>.glb or .gltf, then its external images under <resource>/textures/, the sky's cube map
-//<resource>/<resource>.sky.dds when the sky box is exported, the area light descriptor
+//<resource>/<resource>.sky.dds when it is exported, the area light descriptor
 //<resource>/<resource>.sh9/area-lights.json, and last the render manifest <resource>.manifest.json, which names the
 //others relative to the root. szRelativePath and pData are borrowed for the call. Assets written to one root need
 //distinct resource names.
@@ -307,6 +311,6 @@ public:
     virtual bool FindWAD3Texture(const std::uint8_t* pWad, std::uint64_t wadBytes, const char* szName, GoldSrcAssetConverter::ResolvedTexture* pTexture) noexcept = 0;
 };
 
-#    define UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION "UtilGoldSrcAssetConverterAPI_006"
+#    define UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION "UtilGoldSrcAssetConverterAPI_007"
 
 #endif

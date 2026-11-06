@@ -5,7 +5,7 @@
 //                           [--wad <file.wad>]... [--wad-dir <directory>] [--gltf] [--blueshift] [--external-textures]
 //                           [--visibility] [--collision] [--scale <factor>] [--emissive-scale <factor>]
 //                           [--point-light-intensity-scale <factor>] [--environment-light-intensity-scale <factor>]
-//                           [--no-sky-box] [--sky-radiance-scale <factor>]
+//                           [--no-sky-environment-map] [--sky-box-geometry] [--sky-radiance-scale <factor>]
 //
 //Without -basedir, <map> and the WAD files are paths of the local file system. With -basedir, the tool loads
 //filesystem_stdio.dll from beside the executable and mounts the game's search paths as the engine does (see
@@ -129,11 +129,12 @@ static int Usage()
                  "                                [--wad <file.wad>]... [--wad-dir <directory>] [--gltf] [--blueshift] [--external-textures]\n"
                  "                                [--visibility] [--collision] [--scale <factor>] [--emissive-scale <factor>]\n"
                  "                                [--point-light-intensity-scale <factor>] [--environment-light-intensity-scale <factor>]\n"
-                 "                                [--no-sky-box] [--sky-radiance-scale <factor>]\n"
+                 "                                [--no-sky-environment-map] [--sky-box-geometry] [--sky-radiance-scale <factor>]\n"
                  "  --emissive-scale: texture emission multiplier (default 4; 0 disables emission)\n"
                  "  --point-light-intensity-scale: point light multiplier (default 1; 0 keeps entities without lights)\n"
                  "  --environment-light-intensity-scale: light_environment sun multiplier in lux (default 0.2; 0 keeps entities without lights)\n"
-                 "  --no-sky-box: export neither the sky box nor its cube map (sky images come from -basedir's gfx/env)\n"
+                 "  --no-sky-environment-map: export neither the sky's cube map nor its environment light (sky images come from -basedir's gfx/env)\n"
+                 "  --sky-box-geometry: also export the Sky_Box cube around the map, for glTF viewers\n"
                  "  --sky-radiance-scale: radiance of a white sky texel in the manifest's environment light (default 2)\n"
                  "  --no-area-lights: write an empty area light sidecar\n"
                  "  --area-lights-per-group <1-64>: rectangle budget per emitter (default 16)\n";
@@ -606,8 +607,10 @@ int main(int argc, char** argv)
             request.options.bEmbedBSPCollisionData = true;
         else if (argument == "--no-area-lights")
             request.options.bExportAreaLights = false;
-        else if (argument == "--no-sky-box")
-            request.options.bExportSkyBox = false;
+        else if (argument == "--no-sky-environment-map")
+            request.options.bExportSkyEnvironmentMap = false;
+        else if (argument == "--sky-box-geometry")
+            request.options.bExportSkyBoxGeometry = true;
         else if (argument == "--area-lights-per-group" && bValue)
         {
             const auto* szValue = argv[++i];

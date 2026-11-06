@@ -289,16 +289,47 @@ static tinygltf::Primitive MakeSkyBoxFace(const BSPSkyboxImages& images, std::ui
     return primitive;
 }
 
+//The Sky_Box node under the scene's root, a cube centered on the map's origin whose faces show the images; returns
+//extras.goldsrc.sky.box.
+static nlohmann::json AddSkyBoxNode(const BSPSkyboxImages& images, CGLTFDocumentBuilder& document, ConversionStatistics& statistics)
+{
+    auto& gltf = document.GetModel();
+
+    tinygltf::Mesh mesh;
+    mesh.name = s_SkyBoxName;
+
+    for (std::uint32_t face = 0; face < GoldSrcRender::SkyFaceCount; ++face)
+        mesh.primitives.push_back(MakeSkyBoxFace(images, face, AddSkyBoxMaterial(images, face, gltf), document));
+
+    const auto meshIndex = static_cast<int>(gltf.meshes.size());
+    gltf.meshes.push_back(std::move(mesh));
+    ++statistics.meshCount;
+
+    if (std::find(gltf.extensionsUsed.begin(), gltf.extensionsUsed.end(), s_UnlitExtension) == gltf.extensionsUsed.end())
+        gltf.extensionsUsed.push_back(s_UnlitExtension);
+
+    tinygltf::Node node;
+    node.name = s_SkyBoxName;
+    node.mesh = meshIndex;
+
+    const auto nodeIndex = static_cast<int>(gltf.nodes.size());
+    const auto rootIndex = gltf.scenes[gltf.defaultScene].nodes[0];
+    gltf.nodes.push_back(std::move(node));
+    gltf.nodes[rootIndex].children.push_back(nodeIndex);
+
+    return {{"node", nodeIndex}, {"mesh", meshIndex}, {"halfExtent", s_SkyBoxHalfExtent}};
+}
+
 /*
 ====================
 AddSkyBox
 
 The engine loads a sky box for a map with a texture named sky* (Mod_LoadTextures), from the images
 gfx/env/<skyname><suffix> of the worldspawn's skyname, of "desert" without one, and of "desert" again when no face of
-the named sky loads; a face without image is black (R_LoadSkys). The resolver stands for the image files. The Sky_Box
-node is a child of BSP_Root, beside BSP_World, so that it is not part of the world: it is a cube centered on the
-map's origin with the box's default size, whose faces show the images as R_DrawSkyBox does. Renderers that draw the
-sky around the view sample the cube map in the scene's axes instead.
+the named sky loads; a face without image is black (R_LoadSkys). The resolver stands for the image files. Renderers
+that draw the sky around the view sample the cube map in the scene's axes. The Sky_Box node, for viewers that show
+the glTF as it stands, is a child of BSP_Root, beside BSP_World, so that it is not part of the world: it is a cube
+centered on the map's origin with the box's default size, whose faces show the images as R_DrawSkyBox does.
 ====================
 */
 BSPSkyBox AddSkyBox(const BSPConversionSource& source, std::uint32_t worldspawn, const std::string& environmentMapName, CBSPTextureConverter& textures, CGLTFDocumentBuilder& document, ConversionStatistics& statistics)
@@ -334,36 +365,17 @@ BSPSkyBox AddSkyBox(const BSPConversionSource& source, std::uint32_t worldspawn,
     sky.extras["imageSkyname"] = MakeJSONString(images.skyName, bLatin1);
     sky.extras["faceTextures"] = images.textures;
 
-    if (!request.options.bExportSkyBox || !images.HasImage())
-        return sky;
+    const bool bEnvironmentMap = request.options.bExportSkyEnvironmentMap && images.HasImage();
+    const bool bSkyBoxGeometry = request.options.bExportSkyBoxGeometry && images.HasImage();
 
-    auto& gltf = document.GetModel();
+    if (bSkyBoxGeometry)
+        sky.extras["box"] = AddSkyBoxNode(images, document, statistics);
 
-    tinygltf::Mesh mesh;
-    mesh.name = s_SkyBoxName;
-
-    for (std::uint32_t face = 0; face < GoldSrcRender::SkyFaceCount; ++face)
-        mesh.primitives.push_back(MakeSkyBoxFace(images, face, AddSkyBoxMaterial(images, face, gltf), document));
-
-    const auto meshIndex = static_cast<int>(gltf.meshes.size());
-    gltf.meshes.push_back(std::move(mesh));
-    ++statistics.meshCount;
-
-    if (std::find(gltf.extensionsUsed.begin(), gltf.extensionsUsed.end(), s_UnlitExtension) == gltf.extensionsUsed.end())
-        gltf.extensionsUsed.push_back(s_UnlitExtension);
-
-    tinygltf::Node node;
-    node.name = s_SkyBoxName;
-    node.mesh = meshIndex;
-
-    const auto nodeIndex = static_cast<int>(gltf.nodes.size());
-    const auto rootIndex = gltf.scenes[gltf.defaultScene].nodes[0];
-    gltf.nodes.push_back(std::move(node));
-    gltf.nodes[rootIndex].children.push_back(nodeIndex);
-
-    sky.extras["box"]            = {{"node", nodeIndex}, {"mesh", meshIndex}, {"halfExtent", s_SkyBoxHalfExtent}};
-    sky.extras["environmentMap"] = environmentMapName;
-    sky.environmentMap           = MakeSkyEnvironmentMap(images);
+    if (bEnvironmentMap)
+    {
+        sky.extras["environmentMap"] = environmentMapName;
+        sky.environmentMap           = MakeSkyEnvironmentMap(images);
+    }
 
     return sky;
 }

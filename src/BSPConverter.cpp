@@ -223,7 +223,7 @@ static bool IsValidResourceDirectory(const std::string& resourceName)
 //directory, which holds the asset directory. A renderer reads the model and, through it, its buffers and images; the
 //light probe files are named before a bake writes them, so that the manifest stays valid once they exist. The manifest
 //is also a Donut / RTXPT scene file: models are path strings and graph nodes index them, which is all a scene loader
-//reads. With the sky box, the sky node is the scene's environment light: the sky's cube map, whose texels times
+//reads. With the sky's cube map, the sky node is the scene's environment light: the cube map, whose texels times
 //skyRadianceScale are the radiance seen in the directions they show.
 static nlohmann::json MakeRenderManifest(const BSPConversionOptions& options, const std::string& assetPath, const std::string& lightProbeDirectory, const std::string& environmentMapPath, const std::string& sourceDigest)
 {
@@ -1150,7 +1150,7 @@ static std::string MakeOptionsKey(const BSPConversionOptions& options)
 
     const bool flags[] = {options.bPreserveSkyGeometry, options.bPreserveBrushEntities, options.bPreservePointEntities, options.bPreserveLightmaps, options.bPreserveLightstyles,
                           options.bPreserveSurfaceMetadata, options.bPreserveEntityKeyValues, options.bEmbedTextures, options.bEmbedBSPVisibilityData, options.bEmbedBSPCollisionData,
-                          options.bExportSkyBox};
+                          options.bExportSkyEnvironmentMap, options.bExportSkyBoxGeometry};
 
     std::string key = options.format == OutputFormat::GLB ? "glb;" : "gltf;";
 

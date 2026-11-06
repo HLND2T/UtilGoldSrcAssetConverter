@@ -301,16 +301,16 @@ ConversionError BuildBSPAreaLights(const BSPConversionSource& source, const std:
 nlohmann::json FitBSPAreaLightPrimitive(const BSPPrimitive& primitive, const tinygltf::Material& material, const BSPDecodedImage& image, std::uint32_t budget, nlohmann::json& statistics, std::uint32_t modelIndex);
 
 //The sky of a converted map (BSPSkyBoxConverter.cpp): extras.goldsrc.sky, null when the map has neither sky faces nor
-//a worldspawn skyname, and the cube map file, empty when the sky box is not exported.
+//a worldspawn skyname, and the cube map file, empty when it is not exported.
 struct BSPSkyBox
 {
     nlohmann::json            extras;
     std::vector<std::uint8_t> environmentMap;
 };
 
-//Resolves the sky box images of a map with sky faces as the engine loads them and, when BSPConversionOptions::
-//bExportSkyBox and a face has an image, adds the Sky_Box node under the scene's root and makes the cube map, which
-//extras.goldsrc.sky names as environmentMapName (relative to the asset).
+//Resolves the sky box images of a map with sky faces as the engine loads them and, when a face has an image, makes the
+//cube map with BSPConversionOptions::bExportSkyEnvironmentMap, which extras.goldsrc.sky names as environmentMapName
+//(relative to the asset), and adds the Sky_Box node under the scene's root with bExportSkyBoxGeometry.
 BSPSkyBox AddSkyBox(const BSPConversionSource& source, std::uint32_t worldspawn, const std::string& environmentMapName, CBSPTextureConverter& textures, CGLTFDocumentBuilder& document, ConversionStatistics& statistics);
 
 //The DDS cube map (RGBA8 sRGB, one mip) of the sky box faces, oriented for the converted scene's axes (see

@@ -86,8 +86,8 @@ are written as 255. The lightmap textures are referenced only from here: standar
 | `faceOrder` | string[] | `["rt", "bk", "lf", "ft", "up", "dn"]`: the image name suffixes, in the engine's order |
 | `imageSkyname` | string | the sky whose images were looked up last: `skyname`, or `"desert"` when no face of `skyname` was resolved; only for a map with a sky texture and a resolver |
 | `faceTextures` | integer[6] | glTF texture of each face of `imageSkyname` in `faceOrder`, `-1` when unresolved (the engine draws it black); only with `imageSkyname` |
-| `box` | object | `{node, mesh, halfExtent}`: the `Sky_Box` node and mesh, and the distance of its faces from the map's origin in GoldSrc units; only when the sky box is exported |
-| `environmentMap` | string | the sky's cube map, relative to the asset's directory; with `box` |
+| `box` | object | `{node, mesh, halfExtent}`: the `Sky_Box` node and mesh, and the distance of its faces from the map's origin in GoldSrc units; only when the sky box geometry is exported (`bExportSkyBoxGeometry`) |
+| `environmentMap` | string | the sky's cube map, relative to the asset's directory; only when it is exported (`bExportSkyEnvironmentMap`). Converter versions before 13 wrote it only with `box` |
 
 The engine loads a sky box only for a map with a texture named `sky*`; without one only `skyname` and `faceOrder` are
 present. The sky geometry itself is in the models' `sky` meshes. The `Sky_Box` mesh has one primitive per face in
