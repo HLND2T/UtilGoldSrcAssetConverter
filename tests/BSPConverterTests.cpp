@@ -1092,8 +1092,8 @@ static std::vector<std::uint8_t> MakeBSPWithoutSkyTexture()
     return file;
 }
 
-//The sky box of a map with sky faces: the images the engine loads, the Sky_Box node and its cube map, which the render
-//manifest names as its environment light.
+//The sky box of a map with sky faces: the images the engine loads and their cube map, which the render manifest names
+//as its environment light, and on request the Sky_Box node.
 static void TestSkyBox()
 {
     const auto file = MakeConverterTestBSP();
@@ -1105,12 +1105,26 @@ static void TestSkyBox()
 
     const auto& sky = document.Goldsrc()["sky"];
     Require(sky["skyname"] == "desert" && sky["imageSkyname"] == "desert" && sky["faceOrder"] == json(s_SkyFaceSuffixes), "the sky names its images and their order");
-    Require(sky["box"]["halfExtent"].get<double>() == s_SkyHalfExtent && sky["environmentMap"] == "converter_test.sky.dds", "the sky describes its box and cube map");
+    Require(sky["environmentMap"] == "converter_test.sky.dds" && sky["faceTextures"].size() == s_SkyFaceCount, "the sky names its cube map and images");
+    Require(FindNode(document, "Sky_Box") < 0 && !sky.contains("box"), "the Sky_Box node is only exported on request");
 
-    const auto node = FindNode(document, "Sky_Box");
-    Require(node == sky["box"]["node"].get<int>() && NodeParents(document)[node] == FindNode(document, "BSP_Root"), "the Sky_Box node is a child of BSP_Root, outside the world");
-    Require(document.gltf["nodes"][node]["mesh"] == sky["box"]["mesh"], "the node shows the box mesh");
-    RequireSkyBoxMesh(document, sky, s_SkyFaceCount);
+    //With the geometry, the Sky_Box node shows the images around the map; the cube map is the same.
+    BSPConversionOptions geometry;
+    geometry.bExportSkyBoxGeometry = true;
+
+    const auto geometryRun      = ConvertWithSky(file, geometry, "desert");
+    auto       geometryDocument = ParseGLB(geometryRun.result.data);
+    RequireValidDocument(geometryDocument);
+
+    const auto& geometrySky = geometryDocument.Goldsrc()["sky"];
+    Require(geometrySky["box"]["halfExtent"].get<double>() == s_SkyHalfExtent && geometrySky["environmentMap"] == sky["environmentMap"], "the sky describes its box and cube map");
+
+    const auto node = FindNode(geometryDocument, "Sky_Box");
+    Require(node == geometrySky["box"]["node"].get<int>() && NodeParents(geometryDocument)[node] == FindNode(geometryDocument, "BSP_Root"), "the Sky_Box node is a child of BSP_Root, outside the world");
+    Require(geometryDocument.gltf["nodes"][node]["mesh"] == geometrySky["box"]["mesh"], "the node shows the box mesh");
+    RequireSkyBoxMesh(geometryDocument, geometrySky, s_SkyFaceCount);
+    Require(geometryRun.result.statistics.meshCount == run.result.statistics.meshCount + 1 && geometryRun.result.cacheKey != run.result.cacheKey, "the box adds a mesh and changes the cache key");
+    Require(FindOutput(geometryRun.result, s_TestSkyDDSPath)->bytes == FindOutput(run.result, s_TestSkyDDSPath)->bytes, "the box leaves the cube map alone");
 
     const auto* pDDS = FindOutput(run.result, s_TestSkyDDSPath);
     Require(pDDS, "the cube map is written in the asset directory");
@@ -1124,11 +1138,11 @@ static void TestSkyBox()
     const json expectedSky{{"name", "Sky"}, {"type", "EnvironmentLight"}, {"path", s_TestSkyDDSPath}, {"radianceScale", json::array({s_DefaultSkyRadianceScale, s_DefaultSkyRadianceScale, s_DefaultSkyRadianceScale})}};
     Require(manifest["graph"].size() == 2 && manifest["graph"][1] == expectedSky, "the manifest's environment light is the sky's cube map");
 
-    WriteOutput("converter_skybox.glb", run.result.data);
+    WriteOutput("converter_skybox.glb", geometryRun.result.data);
     WriteOutput("converter_skybox.sky.dds", pDDS->bytes);
 
     //A face without image is black; the others are kept.
-    const auto missing = ConvertWithSky(file, {}, "desert", s_SkyUpFace);
+    const auto missing = ConvertWithSky(file, geometry, "desert", s_SkyUpFace);
     Require(missing.result.bSuccess && HasDiagnostic(missing.result, DiagnosticCode::MissingSkyboxTexture), "a missing face is reported");
     const auto missingDocument = ParseGLB(missing.result.data);
     RequireSkyBoxMesh(missingDocument, missingDocument.Goldsrc()["sky"], s_SkyUpFace);
@@ -1137,20 +1151,28 @@ static void TestSkyBox()
     //A sky none of whose images loads falls back to desert, as does a worldspawn without skyname.
     const auto fallback    = ConvertWithSky(MakeBSPWithWorldspawnSky("\"skyname\" \"nosuch\"\n"), {}, "desert");
     const auto fallbackSky = ParseGLB(fallback.result.data).Goldsrc()["sky"];
-    Require(fallbackSky["skyname"] == "nosuch" && fallbackSky["imageSkyname"] == "desert" && fallbackSky.contains("box"), "an unloadable sky falls back to desert");
+    Require(fallbackSky["skyname"] == "nosuch" && fallbackSky["imageSkyname"] == "desert" && fallbackSky.contains("environmentMap"), "an unloadable sky falls back to desert");
     Require(std::count(fallback.requested.begin(), fallback.requested.end(), "nosuchrt") == 1 && std::count(fallback.requested.begin(), fallback.requested.end(), "desertrt") == 1, "both skies are requested");
 
     const auto unnamed = ConvertWithSky(MakeBSPWithWorldspawnSky(""), {}, "desert");
     Require(ParseGLB(unnamed.result.data).Goldsrc()["sky"]["skyname"] == "desert", "a worldspawn without skyname shows desert");
 
-    //Without the option, the images are kept but neither box nor cube map is exported.
-    BSPConversionOptions noBox;
-    noBox.bExportSkyBox = false;
+    //Without the cube map, the images are kept but neither cube map nor environment light is exported.
+    BSPConversionOptions noEnvironmentMap;
+    noEnvironmentMap.bExportSkyEnvironmentMap = false;
 
-    const auto noBoxRun      = ConvertWithSky(file, noBox, "desert");
-    const auto noBoxDocument = ParseGLB(noBoxRun.result.data);
-    Require(FindNode(noBoxDocument, "Sky_Box") < 0 && !noBoxDocument.Goldsrc()["sky"].contains("box") && noBoxDocument.Goldsrc()["sky"].contains("faceTextures"), "the option leaves the box out");
-    Require(!FindOutput(noBoxRun.result, s_TestSkyDDSPath) && OutputJSON(noBoxRun.result, s_TestManifestPath)["graph"].size() == 1 && noBoxRun.result.cacheKey != run.result.cacheKey, "no cube map or environment light, another cache key");
+    const auto noEnvironmentMapRun = ConvertWithSky(file, noEnvironmentMap, "desert");
+    const auto noEnvironmentMapSky = ParseGLB(noEnvironmentMapRun.result.data).Goldsrc()["sky"];
+    Require(!noEnvironmentMapSky.contains("environmentMap") && !noEnvironmentMapSky.contains("box") && noEnvironmentMapSky.contains("faceTextures"), "the option leaves the cube map out");
+    Require(!FindOutput(noEnvironmentMapRun.result, s_TestSkyDDSPath) && OutputJSON(noEnvironmentMapRun.result, s_TestManifestPath)["graph"].size() == 1 && noEnvironmentMapRun.result.cacheKey != run.result.cacheKey, "no cube map or environment light, another cache key");
+
+    //The two options are independent: the box alone writes no cube map.
+    noEnvironmentMap.bExportSkyBoxGeometry = true;
+
+    const auto boxOnlyRun      = ConvertWithSky(file, noEnvironmentMap, "desert");
+    const auto boxOnlyDocument = ParseGLB(boxOnlyRun.result.data);
+    Require(FindNode(boxOnlyDocument, "Sky_Box") >= 0 && boxOnlyDocument.Goldsrc()["sky"].contains("box") && !boxOnlyDocument.Goldsrc()["sky"].contains("environmentMap"), "the box is exported without the cube map");
+    Require(!FindOutput(boxOnlyRun.result, s_TestSkyDDSPath) && OutputJSON(boxOnlyRun.result, s_TestManifestPath)["graph"].size() == 1, "the box alone is no environment light");
 
     BSPConversionOptions brighter;
     brighter.skyRadianceScale = 2.5f;
@@ -1165,7 +1187,7 @@ static void TestSkyBox()
     //A map without sky texture has no sky box, and no sky image is requested.
     const auto noSkyTexture = ConvertWithSky(MakeBSPWithoutSkyTexture(), {}, "desert");
     const auto noSkySky     = ParseGLB(noSkyTexture.result.data).Goldsrc()["sky"];
-    Require(noSkySky["skyname"] == "desert" && !noSkySky.contains("faceTextures") && !noSkySky.contains("box"), "a map without sky texture keeps only its skyname");
+    Require(noSkySky["skyname"] == "desert" && !noSkySky.contains("faceTextures") && !noSkySky.contains("box") && !noSkySky.contains("environmentMap"), "a map without sky texture keeps only its skyname");
     Require(std::count(noSkyTexture.requested.begin(), noSkyTexture.requested.end(), "desertrt") == 0 && !FindOutput(noSkyTexture.result, s_TestSkyDDSPath), "no sky image is requested");
 }
 

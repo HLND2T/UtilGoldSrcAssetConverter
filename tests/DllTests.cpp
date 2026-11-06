@@ -102,6 +102,7 @@ int main(int argc, char** argv)
     Require(!factory("UtilGoldSrcAssetConverterAPI_003", nullptr), "the request layout without area light options is refused");
     Require(!factory("UtilGoldSrcAssetConverterAPI_004", nullptr), "the request layout without environmentLightIntensityScale is refused");
     Require(!factory("UtilGoldSrcAssetConverterAPI_005", nullptr), "the request layout without sky box options is refused");
+    Require(!factory("UtilGoldSrcAssetConverterAPI_006", nullptr), "the request layout with one option for the sky box and its cube map is refused");
 
     auto* pConverter = static_cast<IUtilGoldSrcAssetConverter*>(factory(UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION, nullptr));
     Require(pConverter, "the converter interface is published");
@@ -165,7 +166,7 @@ int main(int argc, char** argv)
     request.options.environmentLightIntensityScale = BSPConversionOptions{}.environmentLightIntensityScale;
 
     //The sky box options reach the DLL: each changes the cache key.
-    for (auto setOption : {+[](BSPConversionOptions& options) { options.bExportSkyBox = false; }, +[](BSPConversionOptions& options) { options.skyRadianceScale = 0; }})
+    for (auto setOption : {+[](BSPConversionOptions& options) { options.bExportSkyEnvironmentMap = false; }, +[](BSPConversionOptions& options) { options.bExportSkyBoxGeometry = true; }, +[](BSPConversionOptions& options) { options.skyRadianceScale = 0; }})
     {
         CCollectingOutputSink skySink(true);
         request.pOutputSink = &skySink;
