@@ -960,8 +960,9 @@ static bool ParseLightValue(const BSPEntity& entity, tinygltf::Light& light)
 AddPointLights
 
 Only preserved point entities of class "light" gain an identity-transform child. The original node and metadata
-stay intact. Switches and lightstyles do not change these constant lights. Compensate intensity for the root scale
-explicitly: KHR_lights_punctual does not scale light intensity with node transforms. All validation finishes before
+stay intact. The child's extras name the entity's lightstyle, which a renderer scales the light by as GoldSrc scales
+the lightmap layer of the style (switched and animated lights), and its targetname. Compensate intensity for the
+root scale explicitly: KHR_lights_punctual does not scale light intensity with node transforms. All validation finishes before
 any output is sent to the caller; a malformed entity is warned and kept, while overflowing final intensity fails.
 ====================
 */
@@ -1002,9 +1003,12 @@ static bool AddPointLights(const BSPConversionSource& source, const BSPSceneNode
 
         light.name = gltf.nodes[index].name + "_PointLight";
         light.type = "point";
+        nlohmann::json extras;
+        extras["goldsrc"] = MakeLightExtras(source, static_cast<std::uint32_t>(entity), diagnostics);
         tinygltf::Node child;
-        child.name  = light.name;
-        child.light = static_cast<int>(gltf.lights.size());
+        child.name   = light.name;
+        child.light  = static_cast<int>(gltf.lights.size());
+        child.extras = ToGLTFValue(extras);
         gltf.lights.push_back(std::move(light));
         const auto childIndex = AddNode(gltf, std::move(child));
         gltf.nodes[index].children.push_back(childIndex);
@@ -1043,11 +1047,12 @@ static Quaternion MakeEnvironmentLightRotation(const tinygltf::Node& entityNode,
 ====================
 AddEnvironmentLight
 
-The first preserved light_environment entity, in lump order, gains a child with a constant directional light: the sun
+The first preserved light_environment entity, in lump order, gains a child with a directional light: the sun
 HLRAD bakes into the surfaces that see the sky. Maps often repeat the entity with the same values, so later entities
 add no light; a warning names those whose direction, color or brightness differ. The color and brightness come from
 "_light" as for point lights, and the intensity is illuminance, which the root scale does not change. A malformed
 entity is warned and kept, and the next one is tried; an overflowing final intensity fails before any output is sent.
+The child's extras name the entity's lightstyle and targetname, as those of point lights do.
 ====================
 */
 static bool AddEnvironmentLight(const BSPConversionSource& source, const BSPSceneNodes& nodes, CGLTFDocumentBuilder& document, CConversionDiagnostics& diagnostics, std::string& error)
@@ -1115,8 +1120,11 @@ static bool AddEnvironmentLight(const BSPConversionSource& source, const BSPScen
 
         light.name = gltf.nodes[index].name + "_DirectionalLight";
         light.type = "directional";
+        nlohmann::json extras;
+        extras["goldsrc"] = MakeLightExtras(source, static_cast<std::uint32_t>(entity), diagnostics);
         tinygltf::Node child;
-        child.name = light.name;
+        child.name   = light.name;
+        child.extras = ToGLTFValue(extras);
 
         if (!IsIdentityRotation(rotation))
             child.rotation = {rotation.x, rotation.y, rotation.z, rotation.w};

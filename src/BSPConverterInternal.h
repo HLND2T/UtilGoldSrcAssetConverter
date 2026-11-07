@@ -281,6 +281,8 @@ private:
 //extras.goldsrc of the conversion's objects (BSPMetadataWriter.cpp). Strings that are not UTF-8 are stored as
 //Latin-1 decoded text and marked (see MakeJSONString).
 nlohmann::json MakeEntityExtras(const BSPConversionSource& source, std::uint32_t entity, CConversionDiagnostics& diagnostics);
+//The light child of a light entity: its lightstyle and targetname (see AddPointLights).
+nlohmann::json MakeLightExtras(const BSPConversionSource& source, std::uint32_t entity, CConversionDiagnostics& diagnostics);
 nlohmann::json MakePrimitiveExtras(const BSPConversionSource& source, std::uint32_t model, BSPGeometryKind kind, const BSPPrimitive& primitive);
 nlohmann::json MakeMaterialExtras(const BSPConversionSource& source, const BSPMaterialKey& key, CBSPTextureConverter& textures);
 

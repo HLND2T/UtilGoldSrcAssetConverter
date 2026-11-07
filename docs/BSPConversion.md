@@ -133,13 +133,21 @@ nonnegative. Set it to 0 to omit generated lights while keeping original entitie
 parsing. Invalid parameters or final intensities exceeding float range fail with `InvalidRequest` before any output
 is published. Malformed entity values instead produce an `InvalidEntityValue` warning and omit only that light.
 
-Lights are constant: `style`, `pattern` and `spawnflags` remain metadata and do not animate or turn off the exported
-light. `bPreservePointEntities = false` omits both entities and their lights. `light_spot` and lights already removed
+The light child's `extras.goldsrc` carries `lightStyle`, the entity's `style` key read with `atoi` as HLSDK's
+`CLight::KeyValue` does (0 when absent), and `targetname` when the entity has one (see
+`GoldSrcBSPExtrasSchema.md`, "Node extras: light children"). The compilers' `qcsg` gives every light with a
+`targetname` a style of its own from 32 on, shared by lights of the same name, and writes it into `style`; styles 1 to
+12 are the preset animations the mapper picks. GoldSrc scales the lightmap layer of a style by its lightstyle value,
+which the game switches (`a` off, `m` normal) and animates; a renderer scales the light the same way, so switched and
+animated lights follow the game, and a light the map starts off (`spawnflags` 1) is dark until it is switched on. A
+`style` outside 0 to 255 is reported as `InvalidEntityValue` and written as 0. The exported intensity is the light at
+style value `m`; `pattern` and `spawnflags` remain metadata. Converter versions before 14 wrote no light extras.
+`bPreservePointEntities = false` omits both entities and their lights. `light_spot` and lights already removed
 from the BSP are not converted; `light_environment` becomes a directional light (see below). `KHR_lights_punctual` is
 listed in `extensionsUsed` only when lights exist, and is not required. This is a relighting starting point, not a
 physical equivalence to HLRAD. The parameter is included in the cache key. The current request layout requires
-`UtilGoldSrcAssetConverterAPI_007`; old interface versions are rejected. ConverterVersion is 13 and the extras schema
-is 2.
+`UtilGoldSrcAssetConverterAPI_007`; old interface versions are rejected. ConverterVersion is 14 and the extras schema
+is 3.
 
 ## Environment light
 
@@ -171,8 +179,8 @@ intensities exceeding float range fail with `InvalidRequest` before any output i
 Maps often repeat `light_environment` with the same values. Only the first valid entity adds a light: a malformed
 `_light` is an `InvalidEntityValue` warning and the next entity is tried, and a later entity whose direction, color
 or brightness differs from the converted one is reported as `DuplicateEnvironmentLight` and not converted. Repeats
-with the same values are not reported. The light is constant: `style` and the sky's diffuse light (`_diffuse_light`
-of later compilers) are not converted; the sky box is a separate environment light (see "Sky box"). A renderer tracing shadow rays
+with the same values are not reported. The child's extras carry `lightStyle` and `targetname` as those of point lights
+do; the sky's diffuse light (`_diffuse_light` of later compilers) is not converted; the sky box is a separate environment light (see "Sky box"). A renderer tracing shadow rays
 must let them leave through the sky faces: the converted `World_Sky` geometry encloses outdoor areas as the BSP does.
 
 ## Sky box
@@ -367,7 +375,7 @@ writes one model, the world:
 ```json
 {
   "schemaVersion": 2,
-  "converterVersion": 13,
+  "converterVersion": 14,
   "bspSha256": "<SHA-256 of the BSP bytes, lowercase hex>",
   "unitScale": 0.0254,
   "models": ["c1a0/c1a0.glb"],

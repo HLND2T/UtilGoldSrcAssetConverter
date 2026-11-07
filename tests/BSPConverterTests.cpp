@@ -1717,6 +1717,18 @@ static std::vector<std::uint8_t> MakeBSPWithLightFields(const std::string& field
     return AssembleTestBSP(MakeConverterTestLumps(entities.c_str()));
 }
 
+//The fixture's light entity as classname, its "style" key replaced by fields.
+static std::string MakeLightStyleEntities(const std::string& fields, const std::string& classname = "light")
+{
+    std::string       entities      = ConverterTestEntities;
+    const std::string originalStyle = "\"style\" \"5\"\n";
+    entities.replace(entities.find(originalStyle), originalStyle.size(), fields);
+    const std::string originalClass = "\"classname\" \"light\"";
+    entities.replace(entities.find(originalClass), originalClass.size(), "\"classname\" \"" + classname + "\"");
+
+    return entities;
+}
+
 static std::size_t PointLightCount(const Document& document)
 {
     return document.gltf.value("extensions", json::object()).value("KHR_lights_punctual", json::object()).value("lights", json::array()).size();
@@ -1738,6 +1750,14 @@ static std::vector<std::size_t> DirectionalLights(const Document& document)
     return indices;
 }
 
+//Whether a light child's extras carry only the light's style and name: no duplicate entity identity.
+static bool HasOnlyLightExtras(const json& lightNode)
+{
+    const auto goldsrc = lightNode.value("extras", json::object()).value("goldsrc", json::object());
+
+    return goldsrc.value("schemaVersion", json()) == ExtrasSchemaVersion && goldsrc.value("lightStyle", json()).is_number_integer() && !goldsrc.contains("entityIndex") && !goldsrc.contains("classname");
+}
+
 static const json& EntityPointLight(const Document& document)
 {
     const auto entity = FindEntityNode(document, ConverterTestLightEntity);
@@ -1747,7 +1767,7 @@ static const json& EntityPointLight(const Document& document)
     Require(node.value("children", json::array()).size() == 1, "the entity has one light child");
     const auto  child     = node["children"][0].get<int>();
     const auto& lightNode = document.gltf["nodes"][child];
-    Require(lightNode["name"] == "ent_0006_light_PointLight" && !lightNode.contains("extras") && !lightNode.contains("mesh"), "the light child has no duplicate entity identity or mesh");
+    Require(lightNode["name"] == "ent_0006_light_PointLight" && HasOnlyLightExtras(lightNode) && !lightNode.contains("mesh"), "the light child has no duplicate entity identity or mesh");
     Require(NodeMatrix(lightNode) == Identity() && GlobalMatrix(document, child) == GlobalMatrix(document, entity), "the light child inherits the entity transform exactly");
     const auto index = lightNode["extensions"]["KHR_lights_punctual"]["light"].get<int>();
     Require(index == 0, "the child references its exported light");
@@ -1828,6 +1848,78 @@ static void TestPointLightEntities()
     Require(other >= 0 && multiple.gltf["nodes"][other]["extensions"]["KHR_lights_punctual"]["light"] == 1, "each child references its own light index");
     Require(Near(Transform(GlobalMatrix(multiple, other), {}), {10, 30, -20}), "multiple lights inherit independent entity positions");
     WriteOutput("converter_point_lights.glb", multipleRun.result.data);
+}
+
+//The extras.goldsrc of the light child of the light entity of document.
+static json PointLightExtras(const Document& document)
+{
+    EntityPointLight(document);
+
+    const auto& entity = document.gltf["nodes"][FindEntityNode(document, ConverterTestLightEntity)];
+
+    return document.gltf["nodes"][entity["children"][0].get<int>()].value("extras", json::object()).value("goldsrc", json::object());
+}
+
+/*
+    The light children carry the style qcsg's SetLightStyles wrote into the entity's "style" key, as CLight::KeyValue
+    reads it with atoi, and the targetname; out of range styles are reported and written as 0.
+*/
+static void TestPointLightStyles()
+{
+    struct StyleCase
+    {
+        const char* fields;
+        int         lightStyle;
+        const char* szTargetname;
+        bool        bWarning;
+    };
+    //A switchable light of qcsg's first targetname, a preset animation (style 1 to 12) without name, an unnamed light
+    //without style, atoi's leading digits, and styles outside 0 to 255.
+    const StyleCase cases[] = {
+        {"\"targetname\" \"red\"\n\"style\" \"32\"\n\"spawnflags\" \"1\"\n", 32, "red", false},
+        {"\"style\" \"10\"\n", 10, nullptr, false},
+        {"\"style\" \"12\"\n\"targetname\" \"\"\n", 12, nullptr, false},
+        {"", 0, nullptr, false},
+        {"\"style\" \" 33lights\"\n", 33, nullptr, false},
+        {"\"style\" \"255\"\n", 255, nullptr, false},
+        {"\"style\" \"256\"\n", 0, nullptr, true},
+        {"\"style\" \"-1\"\n", 0, nullptr, true}};
+
+    for (const auto& test : cases)
+    {
+        ConversionRun run;
+        const auto    document = ConvertAndParse(AssembleTestBSP(MakeConverterTestLumps(MakeLightStyleEntities(test.fields).c_str())), {}, run);
+        const auto&   extras   = PointLightExtras(document);
+
+        Require(extras.value("lightStyle", json()) == test.lightStyle, "the light child carries the entity's style as atoi reads it");
+        Require(test.szTargetname ? extras.value("targetname", json()) == test.szTargetname : !extras.contains("targetname"), "the light child carries a non-empty targetname");
+        Require(HasDiagnostic(run.result, DiagnosticCode::InvalidEntityValue) == test.bWarning, "only styles outside 0 to 255 are reported");
+    }
+
+    //Lights of one targetname share the style qcsg gave the name; each child carries it, without the raw key values.
+    auto sharedEntities = MakeLightStyleEntities("\"targetname\" \"office\"\n\"style\" \"33\"\n");
+    sharedEntities += "{\n\"classname\" \"light\"\n\"origin\" \"10 20 30\"\n\"targetname\" \"office\"\n\"style\" \"33\"\n}\n";
+
+    ConversionRun sharedRun;
+    const auto    shared = ConvertAndParse(AssembleTestBSP(MakeConverterTestLumps(sharedEntities.c_str())), {}, sharedRun);
+    Require(PointLightCount(shared) == 2, "both lights of the name are exported");
+
+    for (const auto* szNode : {"ent_0006_light_PointLight", "ent_0010_light_PointLight"})
+    {
+        const auto node = FindNode(shared, szNode);
+        Require(node >= 0, "both lights of the name have their light child");
+        const auto extras = shared.gltf["nodes"][node].value("extras", json::object()).value("goldsrc", json::object());
+        Require(extras.value("lightStyle", json()) == 33 && extras.value("targetname", json()) == "office", "lights of one name carry its style");
+    }
+
+    //The directional light of light_environment carries its style too.
+    ConversionRun environmentRun;
+    const auto    environmentEntities = MakeLightStyleEntities("\"style\" \"34\"\n\"targetname\" \"sun\"\n", "light_environment");
+    const auto    environment         = ConvertAndParse(AssembleTestBSP(MakeConverterTestLumps(environmentEntities.c_str())), {}, environmentRun);
+    const auto    directional         = FindNode(environment, "ent_0006_light_environment_DirectionalLight");
+    Require(directional >= 0, "the light_environment has its directional light child");
+    const auto directionalExtras = environment.gltf["nodes"][directional].value("extras", json::object()).value("goldsrc", json::object());
+    Require(directionalExtras.value("lightStyle", json()) == 34 && directionalExtras.value("targetname", json()) == "sun", "the directional light carries the entity's style and targetname");
 }
 
 static void TestPointLightIntensityScale()
@@ -1936,7 +2028,7 @@ static int EnvironmentLightNode(const Document& document, std::uint32_t entity)
     Require(!node.value("extensions", json::object()).contains("KHR_lights_punctual") && node.value("children", json::array()).size() == 1, "the original entity remains an empty node with one light child");
     const auto  child     = node["children"][0].get<int>();
     const auto& lightNode = document.gltf["nodes"][child];
-    Require(lightNode["name"] == node["name"].get<std::string>() + "_DirectionalLight" && !lightNode.contains("extras") && !lightNode.contains("mesh") && !lightNode.contains("translation"), "the light child has no entity identity, mesh or translation");
+    Require(lightNode["name"] == node["name"].get<std::string>() + "_DirectionalLight" && HasOnlyLightExtras(lightNode) && !lightNode.contains("mesh") && !lightNode.contains("translation"), "the light child has no entity identity, mesh or translation");
     Require(lightNode["extensions"]["KHR_lights_punctual"]["light"].get<std::size_t>() == DirectionalLights(document)[0], "the child references the directional light");
 
     return child;
@@ -2751,6 +2843,7 @@ int main(int argc, char** argv)
     TestEntityNodes();
     TestEntityKeyValues();
     TestPointLightEntities();
+    TestPointLightStyles();
     TestPointLightIntensityScale();
     TestEnvironmentLight();
     TestTransforms();

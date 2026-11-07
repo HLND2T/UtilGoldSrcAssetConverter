@@ -1,9 +1,11 @@
 # `extras.goldsrc` schema
 
-Version 2 (`BSPConversionSummary::extrasSchemaVersion`). Every object the converter annotates carries its GoldSrc data
+Version 3 (`BSPConversionSummary::extrasSchemaVersion`). Every object the converter annotates carries its GoldSrc data
 in `extras.goldsrc`, with a `schemaVersion` field. Readers must check `schemaVersion` and ignore fields they do not
 know; fields are only added within a version, never removed or reinterpreted. Changing a field's meaning raises the
 version, and with it the cache key (see `BSPConversionSummary::szCacheKey`).
+
+Version 3 added the extras of light children (see "Node extras: light children").
 
 Version 2 changed `sky`: it is also present for a map with a sky texture and no `skyname` key, whose `skyname` is then
 `desert`, and its `faceTextures` are the images of the sky the engine loads, which may be `desert`'s (`imageSkyname`).
@@ -23,7 +25,7 @@ General rules:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `2` |
+| `schemaVersion` | integer | `3` |
 | `converterVersion` | integer | `ConverterVersion` of the converter that wrote the file |
 | `assetType` | string | `"BSP"` |
 | `sourceFormat` | string | `"BSP30"` or `"BSP30_BlueShift"` (entity and plane lumps swapped) |
@@ -139,7 +141,7 @@ The worldspawn's node (`BSP_World`) and the node of every brush and point entity
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `2` |
+| `schemaVersion` | integer | `3` |
 | `entityIndex` | integer | the entity's index in the lump: its stable identity (node names are not) |
 | `classname` | string | the `classname` value (last occurrence), `""` when absent |
 | `originalModelString` | string | the `model` value, when present |
@@ -158,11 +160,28 @@ The node's TRS is the entity transform in GoldSrc coordinates: translation = ori
 nodes show their model through child nodes named `Model_<n>_<Geometry|Sky|Water>` that reference the model's shared
 meshes; point entity nodes have no mesh.
 
+## Node extras: light children
+
+The `<entity-node-name>_PointLight` child of a `light` entity and the `<entity-node-name>_DirectionalLight` child of the
+converted `light_environment` (see `BSPConversion.md`) carry:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schemaVersion` | integer | `3` |
+| `lightStyle` | integer | the entity's `style` as `atoi` reads it, 0 to 255; `0` when absent or out of range |
+| `targetname` | string | the entity's `targetname`, when it has a non-empty one |
+
+The glTF light is the light at lightstyle value `m` (264, normal brightness). Scale its intensity by
+`lightstyle(lightStyle) / 264`, the factor GoldSrc gives the lightmap layer of that style: `qcsg` writes the style it
+gives each targetname (32 and up, one per name) into `style`, so a switch the game toggles turns these lights off
+(`a`, 0) and on (`m`), and styles 1–12 animate as the engine's preset patterns. The child carries no entity identity;
+its parent's `entityIndex` is the entity.
+
 ## Primitive extras
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `2` |
+| `schemaVersion` | integer | `3` |
 | `bspModelIndex` | integer | the model the primitive belongs to |
 | `geometryKind` | string | `"surface"`, `"sky"` or `"water"` |
 | `faceCount` | integer | number of faces in the primitive |
@@ -186,7 +205,7 @@ Face record columns:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `2` |
+| `schemaVersion` | integer | `3` |
 | `miptexIndex` | integer | the miptex slot of the faces, `-1` without texture lump |
 | `originalTextureName` | string | the miptex name as the engine reads it (with the `~` rule applied) |
 | `storedTextureName` | string | the name as stored in the file, when it differs |
@@ -223,6 +242,6 @@ in `sky.faceOrder`) and `missingTexture` (the face has no image and is black); n
 - Locate entities by `extras.goldsrc.entityIndex`, not by node name or order.
 - Place nodes in GoldSrc space by ignoring `BSP_Root`'s rotation and scale, or work in glTF space with them.
 - Render lightmaps from `asset.extras.goldsrc.lightmaps.layers` and `TEXCOORD_1`, weighting by the face records'
-  styles; render the sky box from `sky` (its cube map, or its images) where `isGoldSrcSky` materials are, leaving the
+  styles, and scale the lights of light children by their `lightStyle` the same way; render the sky box from `sky` (its cube map, or its images) where `isGoldSrcSky` materials are, leaving the
   `Sky_Box` node out; animate water and textures from the material extras.
 - Use `spatialData` only when present; otherwise read PVS and collision from the original BSP.
