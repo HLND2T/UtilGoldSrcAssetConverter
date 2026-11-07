@@ -189,6 +189,12 @@ with the same values are not reported. The child's extras carry `lightStyle` and
 do; the sky's diffuse light (`_diffuse_light` of later compilers) is not converted; the sky box is a separate environment light (see "Sky box"). A renderer tracing shadow rays
 must let them leave through the sky faces: the converted `World_Sky` geometry encloses outdoor areas as the BSP does.
 
+The light child also carries `extras.goldsrc.angularSize`, the full solar disk diameter in degrees. The
+`environmentLightAngularSizeDegrees` option defaults to **2** and must be finite and in `[0, 180]`; 0 requests the
+hard-shadow limit. The angle is independent of `scaleFactor`, belongs to the cache key and changes neither the
+direction nor the illuminance. Supporting renderers spread the light over that disk to produce real penumbrae.
+This is custom metadata, not a standard `KHR_lights_punctual` property; generic glTF viewers may ignore it.
+
 ## Sky box
 
 The engine loads a sky box only for a map with a texture named `sky*`, whether or not its sky faces are kept. The
@@ -496,6 +502,7 @@ GoldSrcAssetConverterCLI <map> [-basedir <directory> [-game <mod>] [-addons] [-n
                          [--visibility] [--collision] [--scale <factor>]
                          [--emissive-scale <factor>] [--point-light-intensity-scale <factor>]
                          [--environment-light-intensity-scale <factor>] [--no-sky-environment-map]
+                         [--environment-light-angular-size <degrees>]
                          [--sky-box-geometry] [--sky-radiance-scale <factor>]
 ```
 
@@ -509,6 +516,10 @@ entity nodes without generating lights; it does not change texture emission. For
 
 `--environment-light-intensity-scale` sets the lux per `_light` brightness unit of the `light_environment` sun
 (default 0.2). Use 0 to retain the entity without generating the directional light.
+
+`--environment-light-angular-size` sets the full sun angular diameter in degrees (default 2, range `[0, 180]`). For
+example, `GoldSrcAssetConverterCLI de_dust2 -basedir <game-directory> -game cstrike --environment-light-angular-size 5`.
+It controls the physical light disk rather than a denoiser blur radius. Reconvert existing assets to write the value.
 
 `--no-sky-environment-map` exports neither the sky's cube map nor its environment light, `--sky-box-geometry` also
 exports the `Sky_Box` node for glTF viewers, and `--sky-radiance-scale` sets the radiance of a white sky texel in the

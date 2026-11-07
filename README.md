@@ -43,6 +43,7 @@ textures from WAD files, given on the command line or, with `-basedir`, found th
 GoldSrcAssetConverterCLI maps/c1a0.bsp -o out --wad-dir valve
 GoldSrcAssetConverterCLI c1a0 -basedir "D:/Half-Life" -o out
 GoldSrcAssetConverterCLI de_dust2 -basedir "D:/Half-Life" -game cstrike -o out
+GoldSrcAssetConverterCLI de_dust2 -basedir "D:/Half-Life" -game cstrike --environment-light-angular-size 5 -o out
 ```
 
 Each map goes into a directory named after it, with its render manifest beside it: the first command writes

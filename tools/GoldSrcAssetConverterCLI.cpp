@@ -5,6 +5,7 @@
 //                           [--wad <file.wad>]... [--wad-dir <directory>] [--gltf] [--blueshift] [--external-textures]
 //                           [--visibility] [--collision] [--scale <factor>] [--emissive-scale <factor>]
 //                           [--point-light-intensity-scale <factor>] [--environment-light-intensity-scale <factor>]
+//                           [--environment-light-angular-size <degrees>]
 //                           [--no-sky-environment-map] [--sky-box-geometry] [--sky-radiance-scale <factor>]
 //
 //Without -basedir, <map> and the WAD files are paths of the local file system. With -basedir, the tool loads
@@ -129,10 +130,12 @@ static int Usage()
                  "                                [--wad <file.wad>]... [--wad-dir <directory>] [--gltf] [--blueshift] [--external-textures]\n"
                  "                                [--visibility] [--collision] [--scale <factor>] [--emissive-scale <factor>]\n"
                  "                                [--point-light-intensity-scale <factor>] [--environment-light-intensity-scale <factor>]\n"
+                 "                                [--environment-light-angular-size <degrees>]\n"
                  "                                [--no-sky-environment-map] [--sky-box-geometry] [--sky-radiance-scale <factor>]\n"
                  "  --emissive-scale: texture emission multiplier (default 4; 0 disables emission)\n"
                  "  --point-light-intensity-scale: point light multiplier (default 1; 0 keeps entities without lights)\n"
                  "  --environment-light-intensity-scale: light_environment sun multiplier in lux (default 0.2; 0 keeps entities without lights)\n"
+                 "  --environment-light-angular-size: sun angular diameter in degrees, in [0, 180] (default 2; 0 requests hard shadows)\n"
                  "  --no-sky-environment-map: export neither the sky's cube map nor its environment light (sky images come from -basedir's gfx/env)\n"
                  "  --sky-box-geometry: also export the Sky_Box cube around the map, for glTF viewers\n"
                  "  --sky-radiance-scale: radiance of a white sky texel in the manifest's environment light (default 2)\n"
@@ -623,7 +626,7 @@ int main(int argc, char** argv)
         }
         else if (argument == "--scale" && bValue)
             request.options.scaleFactor = std::strtof(argv[++i], nullptr);
-        else if ((argument == "--emissive-scale" || argument == "--point-light-intensity-scale" || argument == "--environment-light-intensity-scale" || argument == "--sky-radiance-scale") && bValue)
+        else if ((argument == "--emissive-scale" || argument == "--point-light-intensity-scale" || argument == "--environment-light-intensity-scale" || argument == "--sky-radiance-scale" || argument == "--environment-light-angular-size") && bValue)
         {
             const auto* szValue = argv[++i];
             char*       pEnd{};
@@ -637,13 +640,30 @@ int main(int argc, char** argv)
             }
 
             if (argument == "--emissive-scale")
+            {
                 request.options.emissiveScale = scale;
+            }
             else if (argument == "--point-light-intensity-scale")
+            {
                 request.options.pointLightIntensityScale = scale;
+            }
             else if (argument == "--environment-light-intensity-scale")
+            {
                 request.options.environmentLightIntensityScale = scale;
+            }
+            else if (argument == "--environment-light-angular-size")
+            {
+                if (scale > MaxEnvironmentLightAngularSizeDegrees)
+                {
+                    std::cerr << argument << " must be in [0, 180] degrees\n";
+                    return EXIT_FAILURE;
+                }
+                request.options.environmentLightAngularSizeDegrees = scale;
+            }
             else
+            {
                 request.options.skyRadianceScale = scale;
+            }
         }
         else if (input.empty() && argument[0] != '-')
             input = argument;
