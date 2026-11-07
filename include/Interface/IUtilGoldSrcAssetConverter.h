@@ -19,6 +19,8 @@
 //The glTF layout and the extras.goldsrc schema are described in UtilGoldSrcAssetConverter/docs.
 namespace GoldSrcAssetConverter
 {
+constexpr float MaxEnvironmentLightAngularSizeDegrees = 180.0f;
+
 enum class OutputFormat : std::uint32_t
 {
     //A .gltf JSON document whose binary buffer is embedded as a data URI.
@@ -93,6 +95,11 @@ struct BSPConversionOptions
     //scene with it; it does not change the sky box's images. The default 2 matches the sky's brightness on screen in
     //GoldSrc, whose display gamma brightens it.
     float skyRadianceScale{2.0f};
+
+    //Full angular diameter of the light_environment sun, in degrees; finite and in [0, 180]. Exported on the
+    //directional light child as extras.goldsrc.angularSize. Zero requests the hard-shadow limit. Renderers that
+    //understand this metadata distribute the same illuminance over the sun disk; node scale does not affect it.
+    float environmentLightAngularSizeDegrees{2.0f};
 };
 
 enum class ConversionError : std::uint32_t
@@ -313,6 +320,6 @@ public:
     virtual bool FindWAD3Texture(const std::uint8_t* pWad, std::uint64_t wadBytes, const char* szName, GoldSrcAssetConverter::ResolvedTexture* pTexture) noexcept = 0;
 };
 
-#    define UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION "UtilGoldSrcAssetConverterAPI_007"
+#    define UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION "UtilGoldSrcAssetConverterAPI_008"
 
 #endif

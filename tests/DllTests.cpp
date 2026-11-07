@@ -103,6 +103,7 @@ int main(int argc, char** argv)
     Require(!factory("UtilGoldSrcAssetConverterAPI_004", nullptr), "the request layout without environmentLightIntensityScale is refused");
     Require(!factory("UtilGoldSrcAssetConverterAPI_005", nullptr), "the request layout without sky box options is refused");
     Require(!factory("UtilGoldSrcAssetConverterAPI_006", nullptr), "the request layout with one option for the sky box and its cube map is refused");
+    Require(!factory("UtilGoldSrcAssetConverterAPI_007", nullptr), "the request layout without the sun angular size is refused");
 
     auto* pConverter = static_cast<IUtilGoldSrcAssetConverter*>(factory(UTIL_GOLDSRC_ASSET_CONVERTER_INTERFACE_VERSION, nullptr));
     Require(pConverter, "the converter interface is published");
@@ -164,6 +165,17 @@ int main(int argc, char** argv)
     const auto disabledEnvironment                 = pConverter->ConvertBSP(request);
     Require(disabledEnvironment.error == ConversionError::None && std::strcmp(summary.szCacheKey, disabledEnvironment.szCacheKey) != 0, "the DLL accepts the environment light scale option, which changes the cache key");
     request.options.environmentLightIntensityScale = BSPConversionOptions{}.environmentLightIntensityScale;
+
+    CCollectingOutputSink angularSizeSink(true);
+    request.pOutputSink                                = &angularSizeSink;
+    constexpr float s_CustomSunAngularSizeDegrees      = 5.0f;
+    request.options.environmentLightAngularSizeDegrees = s_CustomSunAngularSizeDegrees;
+    const auto angularSize                             = pConverter->ConvertBSP(request);
+    Require(ConversionError::None == angularSize.error && std::strcmp(summary.szCacheKey, angularSize.szCacheKey) != 0, "the DLL accepts the sun angular size option, which changes the cache key");
+    request.options.environmentLightAngularSizeDegrees = MaxEnvironmentLightAngularSizeDegrees + 1.0f;
+    const auto invalidAngularSize                      = pConverter->ConvertBSP(request);
+    Require(ConversionError::InvalidRequest == invalidAngularSize.error, "the DLL validates the appended sun angular size option");
+    request.options = BSPConversionOptions{};
 
     //The sky box options reach the DLL: each changes the cache key.
     for (auto setOption : {+[](BSPConversionOptions& options) { options.bExportSkyEnvironmentMap = false; }, +[](BSPConversionOptions& options) { options.bExportSkyBoxGeometry = true; }, +[](BSPConversionOptions& options) { options.skyRadianceScale = 0; }})

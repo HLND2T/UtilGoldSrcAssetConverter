@@ -301,6 +301,13 @@ static bool ValidateOptions(const BSPConversionOptions& options, std::string& er
         return false;
     }
 
+    if (!std::isfinite(options.environmentLightAngularSizeDegrees) || options.environmentLightAngularSizeDegrees < 0 ||
+        options.environmentLightAngularSizeDegrees > MaxEnvironmentLightAngularSizeDegrees)
+    {
+        error = "the environment light angular size must be finite and in [0, 180] degrees";
+        return false;
+    }
+
     if (!std::isfinite(options.skyRadianceScale) || options.skyRadianceScale < 0)
     {
         error = "the sky radiance scale must be finite and nonnegative";
@@ -1128,7 +1135,8 @@ static bool AddEnvironmentLight(const BSPConversionSource& source, const BSPScen
         light.name = gltf.nodes[index].name + "_DirectionalLight";
         light.type = "directional";
         nlohmann::json extras;
-        extras["goldsrc"] = MakeLightExtras(source, static_cast<std::uint32_t>(entity), diagnostics);
+        extras["goldsrc"]                = MakeLightExtras(source, static_cast<std::uint32_t>(entity), diagnostics);
+        extras["goldsrc"]["angularSize"] = options.environmentLightAngularSizeDegrees;
         tinygltf::Node child;
         child.name   = light.name;
         child.extras = ToGLTFValue(extras);
@@ -1160,6 +1168,8 @@ static std::string MakeOptionsKey(const BSPConversionOptions& options)
     std::memcpy(&pointLightBits, &options.pointLightIntensityScale, sizeof(pointLightBits));
     std::uint32_t environmentLightBits{};
     std::memcpy(&environmentLightBits, &options.environmentLightIntensityScale, sizeof(environmentLightBits));
+    std::uint32_t environmentLightAngularSizeBits{};
+    std::memcpy(&environmentLightAngularSizeBits, &options.environmentLightAngularSizeDegrees, sizeof(environmentLightAngularSizeBits));
     std::uint32_t skyBits{};
     std::memcpy(&skyBits, &options.skyRadianceScale, sizeof(skyBits));
 
@@ -1180,10 +1190,12 @@ static std::string MakeOptionsKey(const BSPConversionOptions& options)
     std::snprintf(szPointLight, sizeof(szPointLight), "%08x", pointLightBits);
     char szEnvironmentLight[sizeof(environmentLightBits) * 2 + 1]{};
     std::snprintf(szEnvironmentLight, sizeof(szEnvironmentLight), "%08x", environmentLightBits);
+    char szEnvironmentLightAngularSize[sizeof(environmentLightAngularSizeBits) * 2 + 1]{};
+    std::snprintf(szEnvironmentLightAngularSize, sizeof(szEnvironmentLightAngularSize), "%08x", environmentLightAngularSizeBits);
     char szSky[sizeof(skyBits) * 2 + 1]{};
     std::snprintf(szSky, sizeof(szSky), "%08x", skyBits);
 
-    return key + ";scale=" + szScale + ";emissive=" + szEmissive + ";pointLight=" + szPointLight + ";environmentLight=" + szEnvironmentLight + ";sky=" + szSky +
+    return key + ";scale=" + szScale + ";emissive=" + szEmissive + ";pointLight=" + szPointLight + ";environmentLight=" + szEnvironmentLight + ";environmentLightAngularSize=" + szEnvironmentLightAngularSize + ";sky=" + szSky +
         ";areaLights=" + (options.bExportAreaLights ? "1" : "0") + ";areaBudget=" + std::to_string(options.maxAreaLightsPerGroup);
 }
 
