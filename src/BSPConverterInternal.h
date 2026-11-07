@@ -142,6 +142,12 @@ struct BSPConversionSource
     std::vector<BSPEntityInfo>                 entityInfos;
 };
 
+//extras.goldsrc.render_flags: a package-owned instance, independent of runtime entity presentation.
+constexpr std::uint32_t BSPRenderFlagStaticProp = 0x1;
+
+//Flags by entity, with shared submodels kept dynamic when any reference is not static.
+std::vector<std::uint32_t> MakeEntityRenderFlags(const BSPConversionSource& source, CConversionDiagnostics& diagnostics);
+
 //Materials in order of first use.
 class CBSPMaterialRegistry
 {

@@ -143,6 +143,7 @@ The worldspawn's node (`BSP_World`) and the node of every brush and point entity
 | --- | --- | --- |
 | `schemaVersion` | integer | `3` |
 | `entityIndex` | integer | the entity's index in the lump: its stable identity (node names are not) |
+| `render_flags` | integer | rendering ownership bits; `STATIC_PROP = 0x1` makes this inline entity subtree package-owned, independent of runtime entities; zero or absent keeps runtime ownership |
 | `classname` | string | the `classname` value (last occurrence), `""` when absent |
 | `originalModelString` | string | the `model` value, when present |
 | `modelKind` | string | `"inline"` (`*N`, valid model), `"external"` (a file such as `.mdl`/`.spr`), `"invalid"` (`*N` out of range or malformed), `"none"` |
@@ -154,6 +155,15 @@ The worldspawn's node (`BSP_World`) and the node of every brush and point entity
 | `keyvalues` | array | every pair in file order, duplicates and unknown keys included: `[key, value]`, or `[key, value, "latin1"]` when the pair was not UTF-8; omitted without `bPreserveEntityKeyValues` |
 
 Without worldspawn, `BSP_World` carries `{schemaVersion, entityIndex: -1, bspModelIndex: 0}`.
+
+ConverterVersion 15 adds `render_flags` within schema 3. It is independent of GoldSrc `spawnflags` and is written even
+without raw key values. The converter defaults `func_wall` and `func_illusionary` inline entities to `STATIC_PROP` only
+without a non-empty `targetname` or `globalname`, and with `rendermode`, `renderfx`, `effects`, `frame` and `spawnflags`
+zero or absent. Malformed values keep runtime ownership. If a submodel has both static and runtime references, all its
+references remain runtime-owned, with a diagnostic. Other entities have zero flags. Readers ignore unknown bits.
+Static props retain their original metadata; their node rotation follows Spawn: both `func_wall` and
+`func_illusionary` clear it. Package renderers retain the marked subtree and suppress runtime instances of the same
+submodel. The flag does not change game logic or collision. Old packages without it need reconversion for this behavior.
 
 The node's TRS is the entity transform in GoldSrc coordinates: translation = origin, rotation = the engine's
 `R_GetEntityTransform` rotation (yaw about z, pitch about y, roll about x) for `angleUsage: "rotation"`. Brush entity

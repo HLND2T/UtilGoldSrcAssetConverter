@@ -91,6 +91,12 @@ BSP_Root                      rotation -90° about x, scale = scaleFactor
 
 ## Entity transforms
 
+Since ConverterVersion 15, ordinary un-controlled `func_wall` and `func_illusionary` brushes default to package-owned
+static props (`extras.goldsrc.render_flags`, see the extras schema for exclusions). Renderers keep these nodes as
+part of the world independently of network PVS and do not create additional runtime instances. Static `func_wall`
+and `func_illusionary` nodes have no rotation, as their Spawn clears angles. Controlled brushes and
+other classes continue to require runtime entity presentation.
+
 The node of a brush or point entity has the translation of its `origin` and the rotation the engine's
 `R_GetEntityTransform` applies, `T(origin) · Rz(yaw) · Ry(pitch) · Rx(roll)` with angles in degrees:
 
