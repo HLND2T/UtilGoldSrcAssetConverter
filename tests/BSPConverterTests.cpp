@@ -2846,7 +2846,7 @@ static void TestStaticProps()
         options.bPreserveEntityKeyValues = false;
         const auto  document             = ConvertAndParse(AssembleTestBSP(MakeConverterTestLumps((world + entity(szClass, "")).c_str())), options, run);
         const auto& node                 = document.gltf["nodes"][FindEntityNode(document, s_PropEntity)];
-        Require(node["extras"]["goldsrc"]["render_flags"] == BSPRenderFlagStaticProp, "ordinary wall and illusionary brushes are package-owned without raw keys");
+        Require(node["extras"]["goldsrc"]["renderFlags"] == BSPRenderFlagStaticProp, "ordinary wall and illusionary brushes are package-owned without raw keys");
         Require(!node["extras"]["goldsrc"].contains("keyvalues"), "static ownership does not require keyvalue export");
         Require(node["translation"] == json::array({100, 200, 300}), "static props retain their origin");
         Require(!node.contains("rotation"), "wall and illusionary spawn both clear rotation");
@@ -2856,14 +2856,14 @@ static void TestStaticProps()
     {
         ConversionRun run;
         const auto    document = ConvertAndParse(AssembleTestBSP(MakeConverterTestLumps((world + entity("func_wall", szFields)).c_str())), {}, run);
-        Require(document.gltf["nodes"][FindEntityNode(document, s_PropEntity)]["extras"]["goldsrc"]["render_flags"] == 0, "controlled and malformed brushes remain runtime-owned");
+        Require(document.gltf["nodes"][FindEntityNode(document, s_PropEntity)]["extras"]["goldsrc"]["renderFlags"] == 0, "controlled and malformed brushes remain runtime-owned");
     }
 
     for (const auto* szClass : {"func_wall_toggle", "func_door", "func_breakable"})
     {
         ConversionRun run;
         const auto    document = ConvertAndParse(AssembleTestBSP(MakeConverterTestLumps((world + entity(szClass, "")).c_str())), {}, run);
-        Require(document.gltf["nodes"][FindEntityNode(document, s_PropEntity)]["extras"]["goldsrc"]["render_flags"] == 0, "other brush classes stay runtime-owned");
+        Require(document.gltf["nodes"][FindEntityNode(document, s_PropEntity)]["extras"]["goldsrc"]["renderFlags"] == 0, "other brush classes stay runtime-owned");
     }
 
     for (const bool bMixed : {false, true})
@@ -2872,7 +2872,7 @@ static void TestStaticProps()
         const auto    entities = world + entity("func_wall", "\"frame\" \" 0.0 \"\n") + entity("func_illusionary", bMixed ? "\"targetname\" \"controlled\"\n" : "");
         const auto    document = ConvertAndParse(AssembleTestBSP(MakeConverterTestLumps(entities.c_str())), {}, run);
         for (const auto index : {s_PropEntity, s_SharedEntity})
-            Require(document.gltf["nodes"][FindEntityNode(document, index)]["extras"]["goldsrc"]["render_flags"] == (bMixed ? 0 : BSPRenderFlagStaticProp), "a shared submodel has uniform ownership");
+            Require(document.gltf["nodes"][FindEntityNode(document, index)]["extras"]["goldsrc"]["renderFlags"] == (bMixed ? 0 : BSPRenderFlagStaticProp), "a shared submodel has uniform ownership");
         Require(FindChildMesh(document, FindEntityNode(document, s_PropEntity)) == FindChildMesh(document, FindEntityNode(document, s_SharedEntity)), "static instances keep shared geometry");
         if (bMixed)
             Require(HasDiagnostic(run.result, DiagnosticCode::MixedRenderOwnership), "mixed ownership is diagnosed");

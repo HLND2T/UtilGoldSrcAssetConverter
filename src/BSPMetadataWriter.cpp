@@ -267,7 +267,7 @@ nlohmann::json MakeEntityExtras(const BSPConversionSource& source, std::uint32_t
     nlohmann::json extras;
     extras["schemaVersion"] = ExtrasSchemaVersion;
     extras["entityIndex"]   = entity.index;
-    extras["render_flags"]  = 0;
+    extras["renderFlags"]   = 0;
 
     bool bLatin1{};
     extras["classname"] = MakeJSONString(info.classname, bLatin1);
