@@ -1,6 +1,9 @@
 #include "BSPConverterInternal.h"
 
 #include <cstdlib>
+#include <cerrno>
+#include <cctype>
+#include <cmath>
 
 namespace GoldSrcAssetConverter
 {
@@ -177,6 +180,84 @@ static nlohmann::json MakeRenderProperties(const BSPEntity& entity)
     return render;
 }
 
+//A conservative zero test: malformed, overflowing and non-finite values must not opt into static ownership.
+static bool IsZeroRenderProperty(const BSPEntity& entity, const char* szKey)
+{
+    const auto* pValue = entity.FindValue(szKey);
+    if (!pValue)
+        return true;
+
+    char* pEnd{};
+    errno            = 0;
+    const auto value = std::strtod(pValue->c_str(), &pEnd);
+    if (pEnd == pValue->c_str() || errno == ERANGE || !std::isfinite(value) || value != 0)
+        return false;
+
+    while (std::isspace(static_cast<unsigned char>(*pEnd)))
+        ++pEnd;
+
+    return !*pEnd;
+}
+
+static bool IsStaticProp(const BSPEntity& entity, const BSPEntityInfo& info)
+{
+    const bool bClass = info.classname == "func_wall" || info.classname == "func_illusionary";
+    if (!bClass || info.modelKind != BSPEntityModelKind::Inline)
+        return false;
+
+    for (const auto* szKey : {"targetname", "globalname"})
+    {
+        const auto* pValue = entity.FindValue(szKey);
+        if (pValue && !pValue->empty())
+            return false;
+    }
+
+    for (const auto* szKey : {"rendermode", "renderfx", "effects", "frame", "spawnflags"})
+    {
+        if (!IsZeroRenderProperty(entity, szKey))
+            return false;
+    }
+
+    return true;
+}
+
+std::vector<std::uint32_t> MakeEntityRenderFlags(const BSPConversionSource& source, CConversionDiagnostics& diagnostics)
+{
+    std::vector<std::uint32_t> flags(source.entities.size());
+    std::vector<bool>          staticModels(source.world.submodels.size()), dynamicModels(source.world.submodels.size());
+
+    for (std::size_t i = 0; i < source.entities.size(); ++i)
+    {
+        const auto& info = source.entityInfos[i];
+        if (info.modelKind != BSPEntityModelKind::Inline)
+            continue;
+
+        if (IsStaticProp(source.entities[i], info))
+        {
+            flags[i]                      = BSPRenderFlagStaticProp;
+            staticModels[info.modelIndex] = true;
+        }
+        else
+        {
+            dynamicModels[info.modelIndex] = true;
+        }
+    }
+
+    for (std::size_t model = 1; model < staticModels.size(); ++model)
+    {
+        if (staticModels[model] && dynamicModels[model])
+            diagnostics.Report(DiagnosticSeverity::Info, DiagnosticCode::MixedRenderOwnership, "submodel " + std::to_string(model) + ": static and runtime entity references share geometry; all references remain runtime-owned");
+    }
+
+    for (std::size_t i = 0; i < flags.size(); ++i)
+    {
+        if (flags[i] && dynamicModels[source.entityInfos[i].modelIndex])
+            flags[i] = 0;
+    }
+
+    return flags;
+}
+
 nlohmann::json MakeEntityExtras(const BSPConversionSource& source, std::uint32_t entityIndex, CConversionDiagnostics& diagnostics)
 {
     const auto& entity  = source.entities[entityIndex];
@@ -186,6 +267,7 @@ nlohmann::json MakeEntityExtras(const BSPConversionSource& source, std::uint32_t
     nlohmann::json extras;
     extras["schemaVersion"] = ExtrasSchemaVersion;
     extras["entityIndex"]   = entity.index;
+    extras["render_flags"]  = 0;
 
     bool bLatin1{};
     extras["classname"] = MakeJSONString(info.classname, bLatin1);

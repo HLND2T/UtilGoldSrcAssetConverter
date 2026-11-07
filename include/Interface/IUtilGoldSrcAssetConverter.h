@@ -133,7 +133,9 @@ enum class DiagnosticCode : std::uint32_t
     ConversionFailure,
     //A "light_environment" after the first exported one, with a different direction, color or brightness; only the
     //first is converted.
-    DuplicateEnvironmentLight
+    DuplicateEnvironmentLight,
+    //A BSP submodel has both static prop and runtime references; all references remain runtime-owned.
+    MixedRenderOwnership
 };
 
 //szMessage is borrowed for the duration of the sink call.

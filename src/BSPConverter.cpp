@@ -792,6 +792,8 @@ static BSPSceneNodes AddSceneNodes(const BSPConversionSource& source, const std:
     auto&       gltf    = document.GetModel();
     const auto& options = source.pRequest->options;
 
+    const auto renderFlags = MakeEntityRenderFlags(source, diagnostics);
+
     BSPSceneNodes nodes;
     nodes.modelEntities.resize(models.size());
     nodes.entityNodes.resize(source.entities.size(), -1);
@@ -856,9 +858,14 @@ static BSPSceneNodes AddSceneNodes(const BSPConversionSource& source, const std:
         node.name = MakeEntityNodeName(source, entity);
         SetEntityTransform(info, node);
 
+        //CFuncWall::Spawn and CFuncIllusionary::Spawn both clear angles.
+        if (renderFlags[entity] & BSPRenderFlagStaticProp)
+            node.rotation.clear();
+
         nlohmann::json extras;
-        extras["goldsrc"] = MakeEntityExtras(source, entity, diagnostics);
-        node.extras       = ToGLTFValue(extras);
+        extras["goldsrc"]                 = MakeEntityExtras(source, entity, diagnostics);
+        extras["goldsrc"]["render_flags"] = renderFlags[entity];
+        node.extras                       = ToGLTFValue(extras);
 
         const auto index          = AddNode(gltf, std::move(node));
         nodes.entityNodes[entity] = index;
