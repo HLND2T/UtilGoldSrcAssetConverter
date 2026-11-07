@@ -25,6 +25,9 @@ constexpr char s_MaskedTexturePrefix = '{';
 constexpr char s_RandomTilingPrefix  = '-';
 constexpr int  s_DecimalBase         = 10;
 
+//Highest lightstyle of a light: the engine animates 256 styles.
+constexpr int s_MaxLightStyle = 255;
+
 //Overlong three-byte sequences (E0 followed by less than A0) and surrogates (ED followed by A0 or more) are invalid,
 //as are four-byte sequences beyond U+10FFFF (F4 followed by 90 or more) or overlong (F0 followed by less than 90).
 constexpr unsigned char s_ThreeByteOverlongLead = 0xE0;
@@ -233,6 +236,37 @@ nlohmann::json MakeEntityExtras(const BSPConversionSource& source, std::uint32_t
     }
 
     extras["keyvalues"] = std::move(keyValues);
+
+    return extras;
+}
+
+nlohmann::json MakeLightExtras(const BSPConversionSource& source, std::uint32_t entityIndex, CConversionDiagnostics& diagnostics)
+{
+    const auto& entity = source.entities[entityIndex];
+
+    nlohmann::json extras;
+    extras["schemaVersion"] = ExtrasSchemaVersion;
+
+    //The style CLight::KeyValue reads with atoi: qcsg's SetLightStyles writes the one it gives the targetname, the
+    //mapper the preset animations; the engine has styles 0 to s_MaxLightStyle.
+    int style{};
+
+    if (const auto* pValue = entity.FindValue("style"))
+        style = std::atoi(pValue->c_str());
+
+    if (style < 0 || style > s_MaxLightStyle)
+    {
+        diagnostics.Report(DiagnosticSeverity::Warning, DiagnosticCode::InvalidEntityValue, "entity " + std::to_string(entity.index) + ": key \"style\" must be 0 to " + std::to_string(s_MaxLightStyle) + "; the light keeps style 0");
+        style = 0;
+    }
+
+    extras["lightStyle"] = style;
+
+    if (const auto* pValue = entity.FindValue("targetname"); pValue && !pValue->empty())
+    {
+        bool bLatin1{};
+        extras["targetname"] = MakeJSONString(*pValue, bLatin1);
+    }
 
     return extras;
 }
