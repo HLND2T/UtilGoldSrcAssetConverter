@@ -863,9 +863,9 @@ static BSPSceneNodes AddSceneNodes(const BSPConversionSource& source, const std:
             node.rotation.clear();
 
         nlohmann::json extras;
-        extras["goldsrc"]                 = MakeEntityExtras(source, entity, diagnostics);
-        extras["goldsrc"]["render_flags"] = renderFlags[entity];
-        node.extras                       = ToGLTFValue(extras);
+        extras["goldsrc"]                = MakeEntityExtras(source, entity, diagnostics);
+        extras["goldsrc"]["renderFlags"] = renderFlags[entity];
+        node.extras                      = ToGLTFValue(extras);
 
         const auto index          = AddNode(gltf, std::move(node));
         nodes.entityNodes[entity] = index;

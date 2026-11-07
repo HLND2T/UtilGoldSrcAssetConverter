@@ -143,7 +143,7 @@ The worldspawn's node (`BSP_World`) and the node of every brush and point entity
 | --- | --- | --- |
 | `schemaVersion` | integer | `3` |
 | `entityIndex` | integer | the entity's index in the lump: its stable identity (node names are not) |
-| `render_flags` | integer | rendering ownership bits; `STATIC_PROP = 0x1` makes this inline entity subtree package-owned, independent of runtime entities; zero or absent keeps runtime ownership |
+| `renderFlags` | integer | rendering ownership bits; `STATIC_PROP = 0x1` makes this inline entity subtree package-owned, independent of runtime entities; zero or absent keeps runtime ownership |
 | `classname` | string | the `classname` value (last occurrence), `""` when absent |
 | `originalModelString` | string | the `model` value, when present |
 | `modelKind` | string | `"inline"` (`*N`, valid model), `"external"` (a file such as `.mdl`/`.spr`), `"invalid"` (`*N` out of range or malformed), `"none"` |
@@ -156,7 +156,8 @@ The worldspawn's node (`BSP_World`) and the node of every brush and point entity
 
 Without worldspawn, `BSP_World` carries `{schemaVersion, entityIndex: -1, bspModelIndex: 0}`.
 
-ConverterVersion 15 adds `render_flags` within schema 3. It is independent of GoldSrc `spawnflags` and is written even
+ConverterVersion 15 adds this field within schema 3 as `render_flags`; ConverterVersion 16 renames it `renderFlags`, like
+the other fields, and readers ignore `render_flags`. It is independent of GoldSrc `spawnflags` and is written even
 without raw key values. The converter defaults `func_wall` and `func_illusionary` inline entities to `STATIC_PROP` only
 without a non-empty `targetname` or `globalname`, and with `rendermode`, `renderfx`, `effects`, `frame` and `spawnflags`
 zero or absent. Malformed values keep runtime ownership. If a submodel has both static and runtime references, all its
