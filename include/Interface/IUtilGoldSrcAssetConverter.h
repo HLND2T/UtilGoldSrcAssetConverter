@@ -19,6 +19,7 @@
 //The glTF layout and the extras.goldsrc schema are described in UtilGoldSrcAssetConverter/docs.
 namespace GoldSrcAssetConverter
 {
+//The largest BSPConversionOptions::environmentLightAngularSizeDegrees: a sun disk that covers a hemisphere.
 constexpr float MaxEnvironmentLightAngularSizeDegrees = 180.0f;
 
 enum class OutputFormat : std::uint32_t

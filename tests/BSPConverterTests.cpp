@@ -2062,12 +2062,20 @@ static Vec3 ExpectedSkyDirection(double pitch, double yaw)
 //The default lux per "_light" brightness unit of the environment light.
 constexpr float s_DefaultEnvironmentLightScale = 0.2f;
 
+//The default full angular diameter of the environment light's sun disk, in degrees.
+constexpr float s_DefaultEnvironmentLightAngularSizeDegrees = 2.0f;
+
+//The glTF JSON of a converted file of format.
+static json ParseConvertedJSON(const std::vector<std::uint8_t>& file, OutputFormat format)
+{
+    return format == OutputFormat::GLB ? ParseGLB(file).gltf : json::parse(file);
+}
+
 static void TestEnvironmentLightAngularSize()
 {
-    constexpr float s_DefaultAngularSizeDegrees   = 2.0f;
     constexpr float s_CustomAngularSizesDegrees[] = {0.0f, 0.53f, 5.0f, MaxEnvironmentLightAngularSizeDegrees};
     const auto      file                          = MakeBSPWithEntities(MakeEnvironmentEntity("\"_light\" \"250 240 200 80\"\n\"pitch\" \"-60\"\n\"style\" \"34\"\n\"targetname\" \"sun\"\n"));
-    Require(BSPConversionOptions{}.environmentLightAngularSizeDegrees == s_DefaultAngularSizeDegrees, "the public sun angular diameter defaults to two degrees");
+    Require(BSPConversionOptions{}.environmentLightAngularSizeDegrees == s_DefaultEnvironmentLightAngularSizeDegrees, "the public sun angular diameter defaults to two degrees");
 
     for (const auto format : {OutputFormat::GLB, OutputFormat::GLTF})
     {
@@ -2076,10 +2084,10 @@ static void TestEnvironmentLightAngularSize()
         const auto baseline = Convert(file, options);
         Require(baseline.result.bSuccess, "the sun fixture converts in both formats");
         Document baselineDocument;
-        baselineDocument.gltf      = format == OutputFormat::GLB ? ParseGLB(baseline.result.data).gltf : json::parse(baseline.result.data);
+        baselineDocument.gltf      = ParseConvertedJSON(baseline.result.data, format);
         const auto  baselineNode   = EnvironmentLightNode(baselineDocument, s_AppendedEntity);
         const auto& baselineExtras = baselineDocument.gltf["nodes"][baselineNode]["extras"]["goldsrc"];
-        Require(baselineExtras["angularSize"] == s_DefaultAngularSizeDegrees && baselineExtras["lightStyle"] == 34 && baselineExtras["targetname"] == "sun", "the default angular diameter preserves the sun's style and name");
+        Require(baselineExtras["angularSize"] == s_DefaultEnvironmentLightAngularSizeDegrees && baselineExtras["lightStyle"] == 34 && baselineExtras["targetname"] == "sun", "the default angular diameter preserves the sun's style and name");
 
         for (const auto degrees : s_CustomAngularSizesDegrees)
         {
@@ -2087,7 +2095,7 @@ static void TestEnvironmentLightAngularSize()
             const auto run                             = Convert(file, options);
             Require(run.result.bSuccess && baseline.result.cacheKey != run.result.cacheKey && baseline.result.sourceHash == run.result.sourceHash, "sun angular size changes the options part of the cache key");
             Document document;
-            document.gltf   = format == OutputFormat::GLB ? ParseGLB(run.result.data).gltf : json::parse(run.result.data);
+            document.gltf   = ParseConvertedJSON(run.result.data, format);
             const auto node = EnvironmentLightNode(document, s_AppendedEntity);
             Require(document.gltf["nodes"][node]["extras"]["goldsrc"]["angularSize"] == degrees, "GLB and glTF export the full sun angular diameter in degrees, including zero and the upper bound");
             Require(baselineDocument.gltf["extensions"]["KHR_lights_punctual"] == document.gltf["extensions"]["KHR_lights_punctual"] &&
@@ -2178,11 +2186,6 @@ static void TestEnvironmentLight()
     const auto file = MakeBSPWithEntities(MakeEnvironmentEntity("\"_light\" \"100\"\n\"pitch\" \"-60\"\n"));
     const auto run  = Convert(file, {});
     Require(run.result.bSuccess, "the light_environment fixture converts");
-    const auto       defaultDocument                = ParseGLB(run.result.data);
-    const auto       defaultSunNode                 = EnvironmentLightNode(defaultDocument, s_AppendedEntity);
-    constexpr double s_DefaultSunAngularSizeDegrees = 2.0;
-    Require(defaultDocument.gltf["nodes"][defaultSunNode]["extras"]["goldsrc"].value("angularSize", -1.0) == s_DefaultSunAngularSizeDegrees,
-            "the default sun exports a two-degree angular diameter");
 
     for (const auto scale : {0.0f, 0.5f, 4.0f})
     {

@@ -145,6 +145,15 @@ static int Usage()
     return EXIT_FAILURE;
 }
 
+//Parses szValue as a whole finite nonnegative float.
+static bool ParseNonnegativeFloat(const char* szValue, float& value)
+{
+    char* pEnd{};
+    errno = 0;
+    value = std::strtof(szValue, &pEnd);
+    return pEnd != szValue && !*pEnd && errno != ERANGE && std::isfinite(value) && value >= 0;
+}
+
 static const char* GetSeverityName(DiagnosticSeverity severity)
 {
     switch (severity)
@@ -626,44 +635,38 @@ int main(int argc, char** argv)
         }
         else if (argument == "--scale" && bValue)
             request.options.scaleFactor = std::strtof(argv[++i], nullptr);
-        else if ((argument == "--emissive-scale" || argument == "--point-light-intensity-scale" || argument == "--environment-light-intensity-scale" || argument == "--sky-radiance-scale" || argument == "--environment-light-angular-size") && bValue)
+        else if ((argument == "--emissive-scale" || argument == "--point-light-intensity-scale" || argument == "--environment-light-intensity-scale" || argument == "--sky-radiance-scale") && bValue)
         {
-            const auto* szValue = argv[++i];
-            char*       pEnd{};
-            errno            = 0;
-            const auto scale = std::strtof(szValue, &pEnd);
+            float      scale{};
+            const bool bParsed = ParseNonnegativeFloat(argv[++i], scale);
 
-            if (pEnd == szValue || *pEnd || errno == ERANGE || !std::isfinite(scale) || scale < 0)
+            if (!bParsed)
             {
                 std::cerr << argument << " must be a finite nonnegative float\n";
                 return EXIT_FAILURE;
             }
 
             if (argument == "--emissive-scale")
-            {
                 request.options.emissiveScale = scale;
-            }
             else if (argument == "--point-light-intensity-scale")
-            {
                 request.options.pointLightIntensityScale = scale;
-            }
             else if (argument == "--environment-light-intensity-scale")
-            {
                 request.options.environmentLightIntensityScale = scale;
-            }
-            else if (argument == "--environment-light-angular-size")
-            {
-                if (scale > MaxEnvironmentLightAngularSizeDegrees)
-                {
-                    std::cerr << argument << " must be in [0, 180] degrees\n";
-                    return EXIT_FAILURE;
-                }
-                request.options.environmentLightAngularSizeDegrees = scale;
-            }
             else
-            {
                 request.options.skyRadianceScale = scale;
+        }
+        else if (argument == "--environment-light-angular-size" && bValue)
+        {
+            float      degrees{};
+            const bool bParsed = ParseNonnegativeFloat(argv[++i], degrees);
+
+            if (!bParsed || degrees > MaxEnvironmentLightAngularSizeDegrees)
+            {
+                std::cerr << argument << " must be a finite float in [0, " << MaxEnvironmentLightAngularSizeDegrees << "] degrees\n";
+                return EXIT_FAILURE;
             }
+
+            request.options.environmentLightAngularSizeDegrees = degrees;
         }
         else if (input.empty() && argument[0] != '-')
             input = argument;
