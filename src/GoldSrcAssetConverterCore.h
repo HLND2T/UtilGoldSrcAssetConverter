@@ -19,7 +19,8 @@ constexpr std::uint32_t ConverterVersion = 18;
 //Version of the extras.goldsrc schema (docs/GoldSrcBSPExtrasSchema.md).
 constexpr std::uint32_t ExtrasSchemaVersion = 5;
 
-//Supported numerical domain of the optional point-light node metadata (GoldSrcBSPExtrasSchema.md).
+//Supported numerical domain of the optional point-light node metadata (GoldSrcBSPExtrasSchema.md). Keep in sync with
+//GoldSrcRender::MinForwardPlusPointCutoffLux / MaxForwardPlusPointCutoffLux of the renderer that reads it.
 constexpr double MinForwardPlusCutoffLux = 1e-6;
 constexpr double MaxForwardPlusCutoffLux = 1e6;
 
