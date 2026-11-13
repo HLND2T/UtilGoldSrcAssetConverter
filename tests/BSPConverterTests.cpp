@@ -1899,20 +1899,38 @@ static void TestPointLightStyles()
     struct CutoffCase
     {
         const char* szValue;
+        bool        bValid;
         double      cutoff;
     };
-    const CutoffCase cutoffs[] = {{"0.1", 0.1}, {"1e-6", 1e-6}, {"1e6", 1e6}, {" 0.25 ", 0.25}, {"", 0}, {"0", 0}, {"-1", 0}, {"nan", 0}, {"inf", 0}, {"1e-30", 0}, {"1e7", 0}, {"0.1junk", 0}, {"1 2", 0}};
+
+    //Both inclusive limits and surrounding blanks are exported; empty, non-positive, non-finite, out-of-range and
+    //trailing text are not.
+    const CutoffCase cutoffs[] = {
+        {"0.1", true, 0.1},
+        {"1e-6", true, MinForwardPlusCutoffLux},
+        {"1e6", true, MaxForwardPlusCutoffLux},
+        {" 0.25 ", true, 0.25},
+        {"", false, 0},
+        {"0", false, 0},
+        {"-1", false, 0},
+        {"nan", false, 0},
+        {"inf", false, 0},
+        {"1e-30", false, 0},
+        {"1e7", false, 0},
+        {"0.1junk", false, 0},
+        {"1 2", false, 0}};
+
     for (const auto& test : cutoffs)
     {
         const auto    fields = std::string{"\"_forwardplus_cutoff_lux\" \""} + test.szValue + "\"\n";
         ConversionRun run;
-        const auto    document  = ConvertAndParse(AssembleTestBSP(MakeConverterTestLumps(MakeLightStyleEntities(fields.c_str()).c_str())), {}, run);
-        const auto    extras    = PointLightExtras(document);
-        const bool    bOverride = test.cutoff > 0;
-        Require(bOverride == extras.contains("forwardPlus"), "Only valid cutoff overrides are exported on the light child");
-        if (bOverride)
+        const auto    document = ConvertAndParse(AssembleTestBSP(MakeConverterTestLumps(MakeLightStyleEntities(fields.c_str()).c_str())), {}, run);
+        const auto    extras   = PointLightExtras(document);
+
+        Require(test.bValid == extras.contains("forwardPlus"), "Only valid cutoff overrides are exported on the light child");
+        if (test.bValid)
             Require(std::abs(test.cutoff - extras["forwardPlus"]["cutoffLux"].get<double>()) <= s_UnitTolerance, "Cutoff stays an illuminance-equivalent value independent of geometry units");
-        Require(!bOverride == HasDiagnostic(run.result, DiagnosticCode::InvalidEntityValue), "Malformed cutoff values warn and retain the light with global policy");
+        Require(!test.bValid == HasDiagnostic(run.result, DiagnosticCode::InvalidEntityValue), "Malformed cutoff values warn and retain the light with global policy");
     }
 
     //Lights of one targetname share the style qcsg gave the name; each child carries it, without the raw key values.

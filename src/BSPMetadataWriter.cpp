@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 
 namespace GoldSrcAssetConverter
 {
@@ -30,6 +31,10 @@ constexpr int  s_DecimalBase         = 10;
 
 //Highest lightstyle of a light: the engine animates 256 styles.
 constexpr int s_MaxLightStyle = 255;
+
+//Entity key of the optional Forward+ cutoff of a light, and the room its supported interval takes in a diagnostic.
+constexpr char        s_ForwardPlusCutoffKey[] = "_forwardplus_cutoff_lux";
+constexpr std::size_t s_IntervalCapacity       = 64;
 
 //Overlong three-byte sequences (E0 followed by less than A0) and surrogates (ED followed by A0 or more) are invalid,
 //as are four-byte sequences beyond U+10FFFF (F4 followed by 90 or more) or overlong (F0 followed by less than 90).
@@ -322,6 +327,14 @@ nlohmann::json MakeEntityExtras(const BSPConversionSource& source, std::uint32_t
     return extras;
 }
 
+//The closed interval [min, max] in the shortest %g form, for diagnostics.
+static std::string FormatInterval(double min, double max)
+{
+    char szInterval[s_IntervalCapacity]{};
+    std::snprintf(szInterval, sizeof(szInterval), "[%g, %g]", min, max);
+    return szInterval;
+}
+
 nlohmann::json MakeLightExtras(const BSPConversionSource& source, std::uint32_t entityIndex, CConversionDiagnostics& diagnostics)
 {
     const auto& entity = source.entities[entityIndex];
@@ -346,7 +359,7 @@ nlohmann::json MakeLightExtras(const BSPConversionSource& source, std::uint32_t 
 
     //The cutoff is a renderer policy in scene meters, independent of the light's intensity and root scale. Invalid
     //policy metadata retains the light and inherits the renderer's global value rather than discarding illumination.
-    const auto* pCutoff = entity.FindValue("_forwardplus_cutoff_lux");
+    const auto* pCutoff = entity.FindValue(s_ForwardPlusCutoffKey);
     if (source.entityInfos[entityIndex].classname == "light" && pCutoff)
     {
         const char* pBegin = pCutoff->c_str();
@@ -362,7 +375,7 @@ nlohmann::json MakeLightExtras(const BSPConversionSource& source, std::uint32_t 
         }
         else
         {
-            diagnostics.Report(DiagnosticSeverity::Warning, DiagnosticCode::InvalidEntityValue, "entity " + std::to_string(entity.index) + ": key \"_forwardplus_cutoff_lux\" must be one finite number in [1e-6, 1e6]; omitted to inherit the global cutoff");
+            diagnostics.Report(DiagnosticSeverity::Warning, DiagnosticCode::InvalidEntityValue, "entity " + std::to_string(entity.index) + ": key \"" + s_ForwardPlusCutoffKey + "\" must be one finite number in " + FormatInterval(MinForwardPlusCutoffLux, MaxForwardPlusCutoffLux) + "; omitted to inherit the global cutoff");
         }
     }
 
