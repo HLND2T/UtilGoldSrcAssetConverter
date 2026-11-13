@@ -14,10 +14,14 @@
 namespace GoldSrcAssetConverter
 {
 //Changes whenever the same input converts to different output; part of the cache key (see BSPConversionSummary).
-constexpr std::uint32_t ConverterVersion = 17;
+constexpr std::uint32_t ConverterVersion = 18;
 
 //Version of the extras.goldsrc schema (docs/GoldSrcBSPExtrasSchema.md).
-constexpr std::uint32_t ExtrasSchemaVersion = 4;
+constexpr std::uint32_t ExtrasSchemaVersion = 5;
+
+//Supported numerical domain of the optional point-light node metadata (GoldSrcBSPExtrasSchema.md).
+constexpr double MinForwardPlusCutoffLux = 1e-6;
+constexpr double MaxForwardPlusCutoffLux = 1e6;
 
 //Version of the render manifest <resource>.manifest.json (docs/BSPConversion.md, "Render manifest").
 constexpr std::uint32_t RenderManifestSchemaVersion = 2;

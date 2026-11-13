@@ -344,6 +344,28 @@ nlohmann::json MakeLightExtras(const BSPConversionSource& source, std::uint32_t 
 
     extras["lightStyle"] = style;
 
+    //The cutoff is a renderer policy in scene meters, independent of the light's intensity and root scale. Invalid
+    //policy metadata retains the light and inherits the renderer's global value rather than discarding illumination.
+    const auto* pCutoff = entity.FindValue("_forwardplus_cutoff_lux");
+    if (source.entityInfos[entityIndex].classname == "light" && pCutoff)
+    {
+        const char* pBegin = pCutoff->c_str();
+        char*       pEnd{};
+        errno               = 0;
+        const double cutoff = std::strtod(pBegin, &pEnd);
+        while (std::isspace(static_cast<unsigned char>(*pEnd)))
+            ++pEnd;
+        const bool bValidCutoff = pEnd != pBegin && *pEnd == '\0' && errno != ERANGE && std::isfinite(cutoff) && cutoff >= MinForwardPlusCutoffLux && cutoff <= MaxForwardPlusCutoffLux;
+        if (bValidCutoff)
+        {
+            extras["forwardPlus"]["cutoffLux"] = cutoff;
+        }
+        else
+        {
+            diagnostics.Report(DiagnosticSeverity::Warning, DiagnosticCode::InvalidEntityValue, "entity " + std::to_string(entity.index) + ": key \"_forwardplus_cutoff_lux\" must be one finite number in [1e-6, 1e6]; omitted to inherit the global cutoff");
+        }
+    }
+
     if (const auto* pValue = entity.FindValue("targetname"); pValue && !pValue->empty())
     {
         bool bLatin1{};
