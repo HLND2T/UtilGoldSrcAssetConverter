@@ -134,6 +134,12 @@ intensity 0. HDR color values are retained through intensity, without gamma conv
 explicitly compensates illumination for scene scaling: the glTF extension does not scale intensity with node
 transforms. No `range` is written, so lights use inverse-square falloff without a distance cutoff.
 
+An optional entity key `_forwardplus_cutoff_lux` writes `extras.goldsrc.forwardPlus.cutoffLux` on that light child.
+It accepts one finite number in `[1e-6, 1e6]`, independently of root scale and intensity scale. Missing or invalid
+values inherit the renderer's global cutoff; invalid values warn and keep the light. This maximum-RGB-channel
+illuminance-equivalent threshold is a Forward+ range policy, not a photopic measurement or standard glTF `range`.
+Other renderers may ignore it. No automatic radius is baked into the standard light definition.
+
 `pointLightIntensityScale` defaults to 1, independently of texture `emissiveScale`. It must be finite and
 nonnegative. Set it to 0 to omit generated lights while keeping original entities; this also skips `_light`
 parsing. Invalid parameters or final intensities exceeding float range fail with `InvalidRequest` before any output
@@ -152,8 +158,8 @@ style value `m`; `pattern` and `spawnflags` remain metadata. Converter versions 
 from the BSP are not converted; `light_environment` becomes a directional light (see below). `KHR_lights_punctual` is
 listed in `extensionsUsed` only when lights exist, and is not required. This is a relighting starting point, not a
 physical equivalence to HLRAD. The parameter is included in the cache key. The current request layout requires
-`UtilGoldSrcAssetConverterAPI_007`; old interface versions are rejected. ConverterVersion is 14 and the extras schema
-is 3.
+`UtilGoldSrcAssetConverterAPI_008`; old interface versions are rejected. ConverterVersion is 18 and the extras schema
+is 5.
 
 ## Environment light
 

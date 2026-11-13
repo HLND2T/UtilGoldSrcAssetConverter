@@ -1,9 +1,12 @@
 # `extras.goldsrc` schema
 
-Version 4 (`BSPConversionSummary::extrasSchemaVersion`). Every object the converter annotates carries its GoldSrc data
+Version 5 (`BSPConversionSummary::extrasSchemaVersion`). Every object the converter annotates carries its GoldSrc data
 in `extras.goldsrc`, with a `schemaVersion` field. Readers must check `schemaVersion` and ignore fields they do not
 know; fields are only added within a version, never removed or reinterpreted. Changing a field's meaning raises the
 version, and with it the cache key (see `BSPConversionSummary::szCacheKey`).
+
+Version 5 added optional `forwardPlus.cutoffLux` to point-light child nodes, an automatic range policy independent
+of standard glTF light definitions and node scale. Missing values inherit the renderer's global setting.
 
 Version 4 added `angularSize` to directional light children: the sun's full angular diameter in degrees.
 
@@ -27,7 +30,7 @@ General rules:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `4` |
+| `schemaVersion` | integer | `5` |
 | `converterVersion` | integer | `ConverterVersion` of the converter that wrote the file |
 | `assetType` | string | `"BSP"` |
 | `sourceFormat` | string | `"BSP30"` or `"BSP30_BlueShift"` (entity and plane lumps swapped) |
@@ -143,7 +146,7 @@ The worldspawn's node (`BSP_World`) and the node of every brush and point entity
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `4` |
+| `schemaVersion` | integer | `5` |
 | `entityIndex` | integer | the entity's index in the lump: its stable identity (node names are not) |
 | `renderFlags` | integer | rendering ownership bits; `STATIC_PROP = 0x1` makes this inline entity subtree package-owned, independent of runtime entities; zero or absent keeps runtime ownership |
 | `classname` | string | the `classname` value (last occurrence), `""` when absent |
@@ -180,10 +183,11 @@ converted `light_environment` (see `BSPConversion.md`) carry:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `4` |
+| `schemaVersion` | integer | `5` |
 | `lightStyle` | integer | the entity's `style` as `atoi` reads it, 0 to 255; `0` when absent or out of range |
 | `targetname` | string | the entity's `targetname`, when it has a non-empty one |
 | `angularSize` | number | directional light children only: full sun angular diameter in degrees, finite in `[0, 180]`; default `2`, configurable through `environmentLightAngularSizeDegrees` / `--environment-light-angular-size`. Zero requests the hard-shadow limit |
+| `forwardPlus.cutoffLux` | number | optional point-light policy, finite in `[1e-6, 1e6]`, exported from `_forwardplus_cutoff_lux`; maximum RGB channel illuminance-equivalent cutoff, not photopic luminance. Missing/invalid values inherit the renderer's global policy. An explicit standard glTF `range` takes precedence |
 
 The glTF light is the light at lightstyle value `m` (264, normal brightness). Scale its intensity by
 `lightstyle(lightStyle) / 264`, the factor GoldSrc gives the lightmap layer of that style: `qcsg` writes the style it
@@ -199,7 +203,7 @@ Assets converted before schema 4 have no value; consumers retain their previous 
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `4` |
+| `schemaVersion` | integer | `5` |
 | `bspModelIndex` | integer | the model the primitive belongs to |
 | `geometryKind` | string | `"surface"`, `"sky"` or `"water"` |
 | `faceCount` | integer | number of faces in the primitive |
@@ -223,7 +227,7 @@ Face record columns:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | `4` |
+| `schemaVersion` | integer | `5` |
 | `miptexIndex` | integer | the miptex slot of the faces, `-1` without texture lump |
 | `originalTextureName` | string | the miptex name as the engine reads it (with the `~` rule applied) |
 | `storedTextureName` | string | the name as stored in the file, when it differs |

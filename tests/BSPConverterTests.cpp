@@ -1896,6 +1896,25 @@ static void TestPointLightStyles()
         Require(HasDiagnostic(run.result, DiagnosticCode::InvalidEntityValue) == test.bWarning, "only styles outside 0 to 255 are reported");
     }
 
+    struct CutoffCase
+    {
+        const char* szValue;
+        double      cutoff;
+    };
+    const CutoffCase cutoffs[] = {{"0.1", 0.1}, {"1e-6", 1e-6}, {"1e6", 1e6}, {" 0.25 ", 0.25}, {"", 0}, {"0", 0}, {"-1", 0}, {"nan", 0}, {"inf", 0}, {"1e-30", 0}, {"1e7", 0}, {"0.1junk", 0}, {"1 2", 0}};
+    for (const auto& test : cutoffs)
+    {
+        const auto    fields = std::string{"\"_forwardplus_cutoff_lux\" \""} + test.szValue + "\"\n";
+        ConversionRun run;
+        const auto    document  = ConvertAndParse(AssembleTestBSP(MakeConverterTestLumps(MakeLightStyleEntities(fields.c_str()).c_str())), {}, run);
+        const auto    extras    = PointLightExtras(document);
+        const bool    bOverride = test.cutoff > 0;
+        Require(bOverride == extras.contains("forwardPlus"), "Only valid cutoff overrides are exported on the light child");
+        if (bOverride)
+            Require(std::abs(test.cutoff - extras["forwardPlus"]["cutoffLux"].get<double>()) <= s_UnitTolerance, "Cutoff stays an illuminance-equivalent value independent of geometry units");
+        Require(!bOverride == HasDiagnostic(run.result, DiagnosticCode::InvalidEntityValue), "Malformed cutoff values warn and retain the light with global policy");
+    }
+
     //Lights of one targetname share the style qcsg gave the name; each child carries it, without the raw key values.
     auto sharedEntities = MakeLightStyleEntities("\"targetname\" \"office\"\n\"style\" \"33\"\n");
     sharedEntities += "{\n\"classname\" \"light\"\n\"origin\" \"10 20 30\"\n\"targetname\" \"office\"\n\"style\" \"33\"\n}\n";
