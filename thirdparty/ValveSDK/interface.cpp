@@ -147,7 +147,6 @@ CSysModule* Sys_LoadModule(const char* pModuleName)
     if (pModuleName[0] != '/')
     {
         char szCwd[1024];
-        char szAbsoluteModuleName[1024];
 
         getcwd(szCwd, sizeof(szCwd));
         if (szCwd[strlen(szCwd) - 1] == '/')
@@ -166,7 +165,7 @@ CSysModule* Sys_LoadModule(const char* pModuleName)
 
     if (!hDLL)
     {
-        char str[512];
+        char str[2048];
 #ifdef _WIN32
         _snprintf(str, sizeof(str), "%s.dll", pModuleName);
         hDLL = LoadLibrary(str);
