@@ -35,7 +35,7 @@ set(STB_SOURCE_PATH "$ENV{STB_SOURCE_PATH}" CACHE PATH
 set(NLOHMANN_JSON_SOURCE_PATH "$ENV{NLOHMANN_JSON_SOURCE_PATH}" CACHE PATH
   "nlohmann/json source tree, unused when NLOHMANN_JSON_INCLUDE_DIRS is set; empty fetches the pinned release")
 set(UTILGOLDSRCASSETCONVERTER_INTERFACE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ValveSDK" CACHE PATH
-  "Directory of interface.h and interface.cpp, and of FileSystem.h for the command line tool")
+  "Directory of interface.h and interface.cpp, and of filesystem.h for the command line tool")
 
 set(UTILGOLDSRCASSETCONVERTER_CORE_REPOSITORY https://github.com/HLND2T/GoldSrcRenderCore.git)
 set(UTILGOLDSRCASSETCONVERTER_CORE_COMMIT 7f97da178df63daef4d931f0e05278b504b42322)
@@ -77,7 +77,7 @@ function(utilgoldsrcassetconverter_require_files variable)
     endif()
   endforeach()
 endfunction()
-utilgoldsrcassetconverter_require_files(UTILGOLDSRCASSETCONVERTER_INTERFACE_DIR interface.h interface.cpp FileSystem.h)
+utilgoldsrcassetconverter_require_files(UTILGOLDSRCASSETCONVERTER_INTERFACE_DIR interface.h interface.cpp filesystem.h)
 utilgoldsrcassetconverter_require_files(TINYGLTF_SOURCE_PATH tiny_gltf.h)
 utilgoldsrcassetconverter_require_files(STB_SOURCE_PATH stb_image.h stb_image_write.h)
 set(json_found FALSE)

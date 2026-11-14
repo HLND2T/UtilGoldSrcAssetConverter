@@ -17,7 +17,7 @@
 //in the output directory (the current one by default), with the render manifest beside it: maps/c1a0.bsp gives
 //c1a0/c1a0.glb, c1a0/textures/ with --external-textures, and c1a0.manifest.json.
 #include "IUtilGoldSrcAssetConverter.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 
 //Sky images are TGA or BMP files, as the engine reads them.
 #define STB_IMAGE_IMPLEMENTATION
