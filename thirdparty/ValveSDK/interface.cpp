@@ -165,7 +165,7 @@ CSysModule* Sys_LoadModule(const char* pModuleName)
 
     if (!hDLL)
     {
-        char str[512];
+        char str[2048];
 #ifdef _WIN32
         _snprintf(str, sizeof(str), "%s.dll", pModuleName);
         hDLL = LoadLibrary(str);
