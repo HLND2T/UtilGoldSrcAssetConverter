@@ -8,12 +8,12 @@ except for the parts listed below, which keep their own terms.
 Valve SDK files (thirdparty/ValveSDK)
 ------------------------------------------------------------------------------
 
-interface.h, interface.cpp and FileSystem.h are Valve SDK code, copyright Valve
+interface.h, interface.cpp and filesystem.h are Valve SDK code, copyright Valve
 Corporation, as modified by HLND2T-DiligentGraphics. They are NOT licensed under
 the MIT License: they keep their original copyright notices and are distributed
 under the Half-Life 1 SDK license in thirdparty/ValveSDK/LICENSE. The DLL, the
 command line tool and the DLL tests compile interface.cpp; the command line tool
-includes FileSystem.h.
+includes filesystem.h.
 
 ------------------------------------------------------------------------------
 Texture light table (src/HalfLifeTextureLights.h)

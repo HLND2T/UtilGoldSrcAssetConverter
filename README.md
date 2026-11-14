@@ -74,7 +74,7 @@ when `DILIGENT_INCLUDE_DIRS`, `DILIGENT_LIBRARY_DIRS` and `DILIGENT_LIBRARIES` n
 | [tinygltf](https://github.com/syoyo/tinygltf) | `TINYGLTF_SOURCE_PATH` (directory of `tiny_gltf.h`) | `UTILGOLDSRCASSETCONVERTER_TINYGLTF_COMMIT` |
 | [stb](https://github.com/DiligentGraphics/stb) | `STB_SOURCE_PATH` | `UTILGOLDSRCASSETCONVERTER_STB_COMMIT` |
 | [nlohmann/json](https://github.com/nlohmann/json) | `NLOHMANN_JSON_SOURCE_PATH`, or the include directories in `NLOHMANN_JSON_INCLUDE_DIRS` | release v3.12.0 (`json.tar.xz`, SHA-256 checked) |
-| Valve SDK `interface.h`, `interface.cpp`, `FileSystem.h` | `UTILGOLDSRCASSETCONVERTER_INTERFACE_DIR` | not fetched: `thirdparty/ValveSDK` in this repository |
+| Valve SDK `interface.h`, `interface.cpp`, `filesystem.h` | `UTILGOLDSRCASSETCONVERTER_INTERFACE_DIR` | not fetched: `thirdparty/ValveSDK` in this repository |
 
 The pinned versions are set in `CMakeLists.txt`. tinygltf and stb are pinned to the versions DiligentTools ships, so
 the converter writes the same bytes in every build. A parent project that already defines the `GoldSrcRenderCore`
@@ -84,8 +84,8 @@ target keeps it, and nothing is fetched when every source tree is given.
 
 Converting local files (`--wad`, `--wad-dir`) needs only the DLL and the tool. `-basedir` loads `filesystem_stdio.dll`
 from the tool's directory, and this project does not build it: use the `filesystem_stdio.dll` of an
-HLND2T-DiligentGraphics installation (the tool is installed next to it there). `thirdparty/ValveSDK/FileSystem.h` is
-that build's version of the interface: a `filesystem_stdio.dll` built from another version of `FileSystem.h` (for
+HLND2T-DiligentGraphics installation (the tool is installed next to it there). `thirdparty/ValveSDK/filesystem.h` is
+that build's version of the interface: a `filesystem_stdio.dll` built from another version of `filesystem.h` (for
 example the original Half-Life SDK, whose `Read` / `Write` take `int` sizes) does not match on x64.
 
 ### Formatting
